@@ -1,11 +1,11 @@
 import sys
 from setuptools import setup, find_packages
 
-sys.path[0:0] = ["project"]
+sys.path[0:0] = ["evalpgm"]
 from version import __version__
 
 setup(
-    name="project",
+    name="evalpgm",
     python_requires=">3.9.0",
     packages=find_packages(),
     version=__version__,
@@ -16,5 +16,8 @@ setup(
     url="https://github.com/gdewael/project",
     install_requires=[
         "numpy",
+        "torch",
+        "pytorch-lightning",
+        "h5torch"
     ],
 )
