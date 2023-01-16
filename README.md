@@ -1,8 +1,23 @@
-# VAE model architecture
-![alt text](https://github.com/scoutvandenbergh/Thesis-GenModProtDesign/blob/main/Variational%20autoencoder%20white%20background.jpg?raw=true)
+## Usage
 
-# Download training data
-https://ugentbe-my.sharepoint.com/:x:/g/personal/scout_vandenbergh_ugent_be/EfWPHO782xlLrH45shPbFu0Bad7LXEyO4qfwqf4_MH4ygA?e=Eiw5A9
+In your environment, navigate to the root folder of this repo and
+```bash
+pip install -e .
+```
 
-# Download model parameters for VAE
-https://ugentbe-my.sharepoint.com/:u:/g/personal/scout_vandenbergh_ugent_be/ERoCFvmw6B9LsAEv2u6KbL0BTrobVm0uLIS4H9TBTgVYMg?email=Gaetan.DeWaele%40UGent.be&e=yZyZCI
+Now you have installed anything under "evalpgm" as a package and can use it in any folder.
+
+## Package structure:
+
+- `data` contains datamodules
+- `models` contains models
+- `scripts/` contains scripts to process data and train models.
+
+## How to download and process Pfam
+- [Download link](https://github.com/songlab-cal/tape#raw-data) (download Raw Pre-training corpus)
+- Unpack using `tar -zvxf *file*`
+- Run `python evalpgm/process_TAPE.py *pfamfolder*`
+
+## Train a VAE
+- Run `python evalpgm/process_TAPE.py *pfamfolder* *logfolder*`
+- E.g. `nohup python evalpgm/scripts/train_VAE.py ../pfam/ ../logs_tester/ &`
