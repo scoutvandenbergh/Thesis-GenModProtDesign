@@ -18,6 +18,7 @@ setup(
         "numpy",
         "torch",
         "pytorch-lightning",
-        "h5torch"
+        "h5torch",
+        "biopython"
     ],
 )

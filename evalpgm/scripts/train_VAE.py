@@ -1,15 +1,15 @@
 import sys
 import pytorch_lightning as pl
-from evalpgm.data import PfamDataModule
+from evalpgm.data import Uniref50DataModule
 from evalpgm.models import VAE
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.callbacks import EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger
 
-datafolder = str(sys.argv[1])
+data_path = str(sys.argv[1])
 logs_path = str(sys.argv[2])
 
-dm = PfamDataModule(datafolder, batch_size = 128, n_workers = 8)
+dm = Uniref50DataModule(data_path, batch_size = 256, n_workers = 8)
 
 # model
 model = VAE(
