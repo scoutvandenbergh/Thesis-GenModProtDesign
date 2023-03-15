@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
+import math
 
 
 class Permute(nn.Module): 
@@ -140,6 +141,18 @@ class VAE(ModelBackbone):
             nn.Conv1d(hidden_sizes[0], vocab_size, 1), # to output
         )
 
+        self.decoderL = nn.Sequential(
+            nn.Linear(bottleneck_size, 64),
+            nn.GELU(),
+            nn.Linear(64,32),
+            nn.GELU(),
+            nn.Linear(32,16),
+            nn.GELU(),
+            nn.Linear(16,4),
+            nn.GELU(),
+            nn.Linear(4,1)
+        )
+
         self.beta = beta
 
     def encode(self, x):
@@ -148,6 +161,9 @@ class VAE(ModelBackbone):
     
     def decode(self, x):
         return self.decoder(x)
+    
+    def decodeL(self, x):
+        return self.decodeL(x) #added to predict length of protein without padding
 
     def reparameterize(self, mean, logvar):
         std = torch.exp(0.5*logvar)
@@ -157,7 +173,7 @@ class VAE(ModelBackbone):
     def forward(self,x):
         mean, logvar = self.encode(x)
         z = self.reparameterize(mean, logvar)
-        return self.decode(z), mean, logvar
+        return self.decode(z), mean, logvar, self.decodeL(z) #added decodeL to forward pass
         
     def training_step(self, batch, batch_idx):
         X, _ = batch
@@ -165,17 +181,17 @@ class VAE(ModelBackbone):
         reconstruction_loss = F.cross_entropy(recon_x, X)
         KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
-        loss = reconstruction_loss + self.beta * KL_divergence
+        loss = reconstruction_loss + self.beta * KL_divergence #implement loss for correct length
         self.log('train_loss', loss)
         return loss
 
-    def validation_step(self, batch, batch_idx): #need batch_idx? otherwise errors
+    def validation_step(self, batch, batch_idx): 
         X, _ = batch
         recon_x, mean, log_var = self.forward(X)
         reconstruction_loss = F.cross_entropy(recon_x, X)
         KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
-        loss = reconstruction_loss + self.beta * KL_divergence
+        loss = reconstruction_loss + self.beta * KL_divergence #implement loss for correct length
         self.log('val_loss', loss)
         return loss
 
@@ -185,6 +201,74 @@ class VAE(ModelBackbone):
         reconstruction_loss = F.cross_entropy(recon_x, X)
         KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
-        loss = reconstruction_loss + self.beta * KL_divergence
+        loss = reconstruction_loss + self.beta * KL_divergence #implement loss for correct length
         self.log('test_loss', loss)
         return loss
+
+class MultiHeadAttentionLayer(nn.Module):
+    def __init__(self, hidden_size, n_heads, dropout):
+        super().__init__()
+        
+        assert hidden_size % n_heads == 0
+        
+        self.hidden_size = hidden_size
+        self.n_heads = n_heads
+        self.head_dim = hidden_size // n_heads
+        
+        self.kqv = nn.Linear(hidden_size, hidden_size * 3, bias=False) 
+        self.output = nn.Linear(hidden_size, hidden_size)
+        
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, x):
+        B, L, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+        k, q, v = self.kqv(x).chunk(3, dim=-1)
+        
+        k = k.view(B, L, self.n_heads, self.head_dim).transpose(1, 2) # (B, nh, L, hs)
+        q = q.view(B, L, self.n_heads, self.head_dim).transpose(1, 2) # (B, nh, L, hs)
+        v = v.view(B, L, self.n_heads, self.head_dim).transpose(1, 2) # (B, nh, L, hs)
+
+        attn = torch.matmul(q, k.transpose(-2,-1)) * x.size(-1)**0.5 #(B, nh, L, hs) x (B, nh, hs, L) -> (B, nh, L, L)
+        attention = F.softmax(attn, dim=-1)
+        attention = torch.matmul(self.dropout(attention), v) #(B, nh, L, hs)
+        
+        attention = attention.transpose(1, 2).contiguous().view(B, L, C) # (B, L, nh, hs)
+        attention = self.output(attention)
+        
+        return attention
+    
+class GLU(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, input_dim * 2)
+
+    def forward(self, x):
+        gates = self.linear(x).chunk(2, dim=-1) #split into 2 parts
+        #sigmoid(xW + b) * (xV+c)
+        activation = torch.sigmoid(gates[0]) * gates[1]
+        return activation
+
+class SwiGLU(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, input_dim * 2)
+        self.beta = nn.Parameter(torch.ones(input_dim))
+        #nn.Parameter tells pytorch to train this parameter
+
+    def forward(self, x):
+        gates = self.linear(x).chunk(2, dim=-1) #split into 2 parts
+        #Swish_beta(xW+b) * (xV+c)
+        activation = (gates[0] * F.sigmoid(self.beta * gates[1])) * gates[1]
+        return activation
+
+class GeGLU(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, output_dim * 2)
+
+    def forward(self, x):
+        gates = self.linear(x).chunk(2, dim=-1) #split into 2 parts
+        #GELU(xW+b)*(xV+c), GELU from https://arxiv.org/abs/1606.08415
+        activation = (0.5 * gates[0] * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (gates[0] + 0.044715 * torch.pow(gates[0], 3.0))))) * gates[1] #approx
+        #activation = gates[0] * 1/2 * (1 + torch.erf(gates[0] / (math.sqrt(2)))) * gates[1] #more exact?
+        return activation
