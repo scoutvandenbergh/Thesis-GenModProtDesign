@@ -89,7 +89,8 @@ class VAE(ModelBackbone):
         blocks_per_stage = 4,
         n_heads = 8,
         n_warmup_steps = 1000,
-        beta = 0.001):
+        beta = 0.001,
+        gamma = 1e-05):
 
         super().__init__(learning_rate = learning_rate, n_warmup_steps = n_warmup_steps)
         self.save_hyperparameters()
@@ -132,19 +133,20 @@ class VAE(ModelBackbone):
             nn.Conv1d(hidden_sizes[0], vocab_size, kernel_size = 1), # to output
         )
 
-        # self.decoderL = nn.Sequential(
-        #     nn.Linear(bottleneck_size, 64),
-        #     nn.GELU(),
-        #     nn.Linear(64,32),
-        #     nn.GELU(),
-        #     nn.Linear(32,16),
-        #     nn.GELU(),
-        #     nn.Linear(16,4),
-        #     nn.GELU(),
-        #     nn.Linear(4,1)
-        # )
+        self.decoderLength = nn.Sequential(
+            nn.Linear(bottleneck_size, 64),
+            nn.GELU(),
+            nn.Linear(64,32),
+            nn.GELU(),
+            nn.Linear(32,16),
+            nn.GELU(),
+            nn.Linear(16,4),
+            nn.GELU(),
+            nn.Linear(4,1)
+        )
 
         self.beta = beta
+        self.gamma = gamma
 
     def encode(self, x):
         x = self.encoder(x)
@@ -152,9 +154,6 @@ class VAE(ModelBackbone):
     
     def decode(self, x):
         return self.decoder(x)
-    
-    # def decodeL(self, x):
-    #     return self.decodeL(x) #added to predict length of protein without padding
 
     def reparameterize(self, mean, logvar):
         std = torch.exp(0.5*logvar)
@@ -164,36 +163,114 @@ class VAE(ModelBackbone):
     def forward(self,x):
         mean, logvar = self.encode(x)
         z = self.reparameterize(mean, logvar)
-        return self.decode(z), mean, logvar #, self.decodeL(z) #added decodeL to forward pass
+        return self.decode(z), mean, logvar , self.decoderLength(z) #added decodeL to forward pass
         
     def training_step(self, batch, batch_idx):
-        X, _ = batch
-        recon_x, mean, log_var = self.forward(X)
-        reconstruction_loss = F.cross_entropy(recon_x, X)
+        X, actual_lengths = batch
+        print("TRAINING STEP")
+        recon_x, mean, log_var, length_pred = self.forward(X)
+        print("[TRAIN] predicted lengths byy decoder", length_pred)
+
+        #actual_lengths = torch.sum(X != 21, dim=1).float() #torch.Size(B)
+        print("[TRAIN] actual lengths", actual_lengths)
+        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+        print("[TRAIN] predicted lengths", pred_lengths)
+        print("[TRAIN] predicted lengths rounded", torch.round(pred_lengths))
+
+        #Messy implementation, but idk how else to calc correctly for each individual protein in the batch
+        recon_losses = []
+        length_losses = []
+        for i, (inputSeq, length, reconSeq, predL) in enumerate(zip(X, actual_lengths, recon_x, pred_lengths)):
+
+            print("Sequence", i)
+            print("original full", X[i], X[i].shape)
+            inputSeq = inputSeq[:int(length)].float() #needs to be float for F.cross_entropy
+            print("real length", inputSeq, inputSeq.shape)
+
+            recon_seq = reconSeq[i, :int(length.item())].float() #Use real length to splice on reconstructed input, int to round
+            print("reconstructed", recon_seq, recon_seq.shape)
+
+            loss = F.cross_entropy(recon_seq, inputSeq)
+            lengthLoss = F.mse_loss(length, predL)
+            print(loss)
+            recon_losses.append(loss)
+            length_losses.append(lengthLoss)
+
+        reconstruction_loss = torch.mean(torch.stack(recon_losses))
+        length_loss = torch.mean(torch.stack(length_loss))
         KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
-        loss = reconstruction_loss + self.beta * KL_divergence #implement loss for correct length
+        loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss #implement weighing factor for length loss?
         self.log('train_loss', loss)
         return loss
 
-    def validation_step(self, batch, batch_idx): 
-        X, _ = batch
-        recon_x, mean, log_var = self.forward(X)
-        reconstruction_loss = F.cross_entropy(recon_x, X)
+    def test_step(self, batch, batch_idx):
+        X, actual_lengths = batch
+        print("[TEST] STEP")
+        recon_x, mean, log_var, length_pred = self.forward(X)
+        print("[TEST] predicted lengths by decoder", length_pred)
+
+        #actual_lengths = torch.sum(X != 21, dim=1).float() #torch.Size(B)
+        print("[TEST] actual lengths", actual_lengths)
+        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+        print("[TEST] predicted lengths by decoder real", pred_lengths)
+        print("[TEST] predicted lengths rounded", torch.round(pred_lengths))
+
+        #Messy implementation, but idk how else to calc correctly for each individual protein in the batch
+        recon_losses = []
+        length_losses = []
+        for i, (inputSeq, length, reconSeq, predL) in enumerate(zip(X, actual_lengths, recon_x, pred_lengths)):
+            inputSeq = inputSeq[:int(length)].float() #needs to be float for F.cross_entropy
+            print(inputSeq.shape)
+            recon_seq = reconSeq[i, :int(length.item())].float() #Use real length to splice on reconstructed input, int to round
+            print(recon_seq.shape)
+
+            loss = F.cross_entropy(recon_seq, inputSeq)
+            lengthLoss = F.mse_loss(length, predL)
+            recon_losses.append(loss)
+            length_losses.append(lengthLoss)
+
+        reconstruction_loss = torch.mean(torch.stack(recon_losses))
+        length_loss = torch.mean(torch.stack(length_loss))
         KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
-        loss = reconstruction_loss + self.beta * KL_divergence #implement loss for correct length
-        self.log('val_loss', loss)
+        loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss #implement weighing factor for length loss?
+        self.log('test_loss', loss)
         return loss
 
-    def test_step(self, batch, batch_idx):
-        X, _ = batch
-        recon_x, mean, log_var = self.forward(X)
-        reconstruction_loss = F.cross_entropy(recon_x, X)
+    def validation_step(self, batch, batch_idx): 
+        X, actual_lengths = batch
+        print("VALIDATION STEP")
+        recon_x, mean, log_var, length_pred = self.forward(X)
+        print("recon_x", recon_x, recon_x.shape)
+        print("[VALIDATION] predicted length by decoder", length_pred)
+        
+        actual_lengths = torch.sum(X != 21, dim=1).float() #torch.Size(B)
+        print("[VALIDATION] actual le,gths", actual_lengths)
+        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+        print("[VALIDATION] predicted lengtghs by decoder", pred_lengths)
+        print("[VALIDATION] predicted lengths rounded", torch.round(pred_lengths))
+
+        #Messy implementation, but idk how else to calc correctly for each individual protein in the batch
+        recon_losses = []
+        length_losses = []
+        for i, (inputSeq, length, reconSeq, predL) in enumerate(zip(X, actual_lengths, recon_x, pred_lengths)):
+            inputSeq = inputSeq[:int(length)].float() #needs to be float for F.cross_entropy
+            print("inputSeq", inputSeq.shape)
+            recon_seq = reconSeq[:, :int(length.item())].float() #Use real length to splice on reconstructed input, int to round
+            print("recon_seq", recon_seq.shape)
+
+            loss = F.cross_entropy(recon_seq, inputSeq)
+            lengthLoss = F.mse_loss(length, predL)
+            recon_losses.append(loss)
+            length_losses.append(lengthLoss)
+
+        reconstruction_loss = torch.mean(torch.stack(recon_losses))
+        length_loss = torch.mean(torch.stack(length_loss))
         KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
-        loss = reconstruction_loss + self.beta * KL_divergence #implement loss for correct length
-        self.log('test_loss', loss)
+        loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss #implement weighing factor for length loss?
+        self.log('validation_loss', loss)
         return loss
 
 class VAE_transformer(ModelBackbone):
@@ -206,7 +283,8 @@ class VAE_transformer(ModelBackbone):
         blocks_per_stage = 4,
         n_heads = 8,
         n_warmup_steps = 1000,
-        beta = 0.001):
+        beta = 0.001,
+        gamma = 1e-05):
 
         super().__init__(learning_rate = learning_rate, n_warmup_steps = n_warmup_steps)
         self.save_hyperparameters()
@@ -217,23 +295,23 @@ class VAE_transformer(ModelBackbone):
             Permute(0,2,1), # B x 128 x 1024
             #*[ResidualBlock(hidden_sizes[0], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)],
             Permute(0,2,1),
-            *[TransformerRoPE(hidden_sizes[0], hidden_sizes[0], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            *[TransformerRoPE(hidden_sizes[0], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
             Permute(0,2,1),
             nn.Conv1d(hidden_sizes[0], hidden_sizes[1], kernel_size = 4, stride = 4), # 1024 -> 256
             Permute(0,2,1),
-            *[TransformerRoPE(hidden_sizes[1], hidden_sizes[1], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            *[TransformerRoPE(hidden_sizes[1], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
             Permute(0,2,1),
             nn.Conv1d(hidden_sizes[1], hidden_sizes[2], kernel_size = 4, stride = 4), # 256 -> 64
             Permute(0,2,1),
-            *[TransformerRoPE(hidden_sizes[2], hidden_sizes[2], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            *[TransformerRoPE(hidden_sizes[2], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
             Permute(0,2,1),
             nn.Conv1d(hidden_sizes[2], hidden_sizes[3], kernel_size = 4, stride = 4), # 64 -> 16
             Permute(0,2,1),
-            *[TransformerRoPE(hidden_sizes[3], hidden_sizes[3], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            *[TransformerRoPE(hidden_sizes[3], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
             Permute(0,2,1),
             nn.Conv1d(hidden_sizes[3], hidden_sizes[4], kernel_size = 4, stride = 4), # 16 -> 4
             Permute(0,2,1),
-            *[TransformerRoPE(hidden_sizes[4], hidden_sizes[4], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            *[TransformerRoPE(hidden_sizes[4], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
             Permute(0,2,1),
             View(-1, hidden_sizes[4]*4),
             nn.Linear(hidden_sizes[4]*4, bottleneck_size),
@@ -249,23 +327,23 @@ class VAE_transformer(ModelBackbone):
             nn.GELU(),
             View(-1, hidden_sizes[4], 4), # put them into B x 256 x 4, just as it was in last conv of encoder
             Permute(0,2,1),
-            *[TransformerRoPE(hidden_sizes[4], hidden_sizes[4], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            *[TransformerRoPE(hidden_sizes[4], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
             Permute(0,2,1),
             nn.ConvTranspose1d(hidden_sizes[4], hidden_sizes[3], kernel_size = 4, stride = 4), # 4 -> 16
             Permute(0,2,1),
-            *[TransformerRoPE(hidden_sizes[3], hidden_sizes[3], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            *[TransformerRoPE(hidden_sizes[3], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
             Permute(0,2,1),
             nn.ConvTranspose1d(hidden_sizes[3], hidden_sizes[2], kernel_size = 4, stride = 4), # 4 -> 16
             Permute(0,2,1),
-            *[TransformerRoPE(hidden_sizes[2], hidden_sizes[2], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            *[TransformerRoPE(hidden_sizes[2], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
             Permute(0,2,1),
             nn.ConvTranspose1d(hidden_sizes[2], hidden_sizes[1], kernel_size = 4, stride = 4), # 4 -> 16
             Permute(0,2,1),
-            *[TransformerRoPE(hidden_sizes[1], hidden_sizes[1], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            *[TransformerRoPE(hidden_sizes[1], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
             Permute(0,2,1),
             nn.ConvTranspose1d(hidden_sizes[1], hidden_sizes[0], kernel_size = 4, stride = 4), # 4 -> 16
             Permute(0,2,1),
-            *[TransformerRoPE(hidden_sizes[0], hidden_sizes[0], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            *[TransformerRoPE(hidden_sizes[0], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
             Permute(0,2,1),
             nn.Conv1d(hidden_sizes[0], vocab_size, kernel_size = 1), # to output
         )
@@ -283,6 +361,7 @@ class VAE_transformer(ModelBackbone):
         # )
 
         self.beta = beta
+        self.gamma = gamma
 
     def encode(self, x):
         x = self.encoder(x)
@@ -315,7 +394,7 @@ class VAE_transformer(ModelBackbone):
         return loss
 
     def validation_step(self, batch, batch_idx): 
-        X, _ = batch
+        X, _ = batch #X, length
         recon_x, mean, log_var = self.forward(X)
         reconstruction_loss = F.cross_entropy(recon_x, X)
         KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
@@ -404,12 +483,16 @@ class RoPEMultiHeadAttentionLayer(nn.Module):
         return attention
     
 class TransformerRoPE(nn.Module):
-    def __init__(self, input_dim, hidden_size, n_heads, dropout):
+    def __init__(self, hidden_size, n_heads, dropout):
         super().__init__()
-        self.ln1 = nn.LayerNorm(input_dim)
-        self.ln2 = nn.LayerNorm(input_dim)
+        self.ln1 = nn.LayerNorm(hidden_size)
+        self.ln2 = nn.LayerNorm(hidden_size)
         self.RoPE_MHA = RoPEMultiHeadAttentionLayer(hidden_size, n_heads, dropout)
-        self.ffn = SwiGLU(input_dim)
+        self.ffn = nn.Sequential(
+            SwiGLU(hidden_size),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size*4, hidden_size)      
+        )
         
     def forward(self, x):
         pre_ln = self.ln1(x)
@@ -435,8 +518,8 @@ class GLU(nn.Module):
 class SwiGLU(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
-        self.linear = nn.Linear(input_dim, input_dim * 2)
-        self.beta = nn.Parameter(torch.ones(input_dim))
+        self.linear = nn.Linear(input_dim, input_dim * 8)
+        self.beta = nn.Parameter(torch.ones(input_dim * 4))
         #nn.Parameter tells pytorch to train this parameter
 
     def forward(self, x):

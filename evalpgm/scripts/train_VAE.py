@@ -9,7 +9,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 data_path = str(sys.argv[1])
 logs_path = str(sys.argv[2])
 
-dm = Uniref50DataModule(data_path, batch_size = 256, n_workers = 8)
+dm = Uniref50DataModule(data_path, batch_size = 4, n_workers = 8)
 
 # model or use VAE_transformer
 model = VAE(
