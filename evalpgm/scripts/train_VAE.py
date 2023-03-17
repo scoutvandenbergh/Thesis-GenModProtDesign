@@ -9,7 +9,8 @@ from pytorch_lightning.loggers import TensorBoardLogger
 data_path = str(sys.argv[1])
 logs_path = str(sys.argv[2])
 
-dm = Uniref50DataModule(data_path, batch_size = 4, n_workers = 8)
+dm = Uniref50DataModule(data_path, batch_size = 4, n_workers = 8, subsample = None)
+# Can also use subsample = 0.001 to use 0.1% of the data for quick testing
 
 # model or use VAE_transformer
 model = VAE(
@@ -24,8 +25,8 @@ model = VAE(
 
 
 callbacks = [
-    ModelCheckpoint(monitor="val_loss", mode="min"),
-    EarlyStopping(monitor='val_loss', patience=7, verbose=True, mode='min')
+    ModelCheckpoint(monitor="validation_loss", mode="min"),
+    EarlyStopping(monitor='validation_loss', patience=7, verbose=True, mode='min')
     ]
 logger = TensorBoardLogger(
     logs_path, name="use_this_name_to_specify_which_model_it_is_eg_hyperparameters"
@@ -37,7 +38,7 @@ trainer = pl.Trainer(
     logger = logger,
     val_check_interval=10_000,
     check_val_every_n_epoch=None,
-	devices=1,
+	devices=[1], # This selects the second gpu on nvidia-smi
     callbacks=callbacks)
 
 #tensorboard --logdir logs in terminal --> not showing up anything in browser
