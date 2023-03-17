@@ -167,37 +167,12 @@ class VAE(ModelBackbone):
         
     def training_step(self, batch, batch_idx):
         X, actual_lengths = batch
-        print("TRAINING STEP")
         recon_x, mean, log_var, length_pred = self.forward(X)
-        print("[TRAIN] predicted lengths byy decoder", length_pred)
 
-        #actual_lengths = torch.sum(X != 21, dim=1).float() #torch.Size(B)
-        print("[TRAIN] actual lengths", actual_lengths)
-        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
-        print("[TRAIN] predicted lengths", pred_lengths)
-        print("[TRAIN] predicted lengths rounded", torch.round(pred_lengths))
+        lengthmask = self.get_mask(length_pred)
 
-        #Messy implementation, but idk how else to calc correctly for each individual protein in the batch
-        recon_losses = []
-        length_losses = []
-        for i, (inputSeq, length, reconSeq, predL) in enumerate(zip(X, actual_lengths, recon_x, pred_lengths)):
-
-            print("Sequence", i)
-            print("original full", X[i], X[i].shape)
-            inputSeq = inputSeq[:int(length)].float() #needs to be float for F.cross_entropy
-            print("real length", inputSeq, inputSeq.shape)
-
-            recon_seq = reconSeq[i, :int(length.item())].float() #Use real length to splice on reconstructed input, int to round
-            print("reconstructed", recon_seq, recon_seq.shape)
-
-            loss = F.cross_entropy(recon_seq, inputSeq)
-            lengthLoss = F.mse_loss(length, predL)
-            print(loss)
-            recon_losses.append(loss)
-            length_losses.append(lengthLoss)
-
-        reconstruction_loss = torch.mean(torch.stack(recon_losses))
-        length_loss = torch.mean(torch.stack(length_loss))
+        reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
+        length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
         KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
         loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss #implement weighing factor for length loss?
@@ -206,32 +181,12 @@ class VAE(ModelBackbone):
 
     def test_step(self, batch, batch_idx):
         X, actual_lengths = batch
-        print("[TEST] STEP")
         recon_x, mean, log_var, length_pred = self.forward(X)
-        print("[TEST] predicted lengths by decoder", length_pred)
 
-        #actual_lengths = torch.sum(X != 21, dim=1).float() #torch.Size(B)
-        print("[TEST] actual lengths", actual_lengths)
-        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
-        print("[TEST] predicted lengths by decoder real", pred_lengths)
-        print("[TEST] predicted lengths rounded", torch.round(pred_lengths))
+        lengthmask = self.get_mask(length_pred)
 
-        #Messy implementation, but idk how else to calc correctly for each individual protein in the batch
-        recon_losses = []
-        length_losses = []
-        for i, (inputSeq, length, reconSeq, predL) in enumerate(zip(X, actual_lengths, recon_x, pred_lengths)):
-            inputSeq = inputSeq[:int(length)].float() #needs to be float for F.cross_entropy
-            print(inputSeq.shape)
-            recon_seq = reconSeq[i, :int(length.item())].float() #Use real length to splice on reconstructed input, int to round
-            print(recon_seq.shape)
-
-            loss = F.cross_entropy(recon_seq, inputSeq)
-            lengthLoss = F.mse_loss(length, predL)
-            recon_losses.append(loss)
-            length_losses.append(lengthLoss)
-
-        reconstruction_loss = torch.mean(torch.stack(recon_losses))
-        length_loss = torch.mean(torch.stack(length_loss))
+        reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
+        length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
         KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
         loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss #implement weighing factor for length loss?
@@ -240,38 +195,28 @@ class VAE(ModelBackbone):
 
     def validation_step(self, batch, batch_idx): 
         X, actual_lengths = batch
-        print("VALIDATION STEP")
         recon_x, mean, log_var, length_pred = self.forward(X)
-        print("recon_x", recon_x, recon_x.shape)
-        print("[VALIDATION] predicted length by decoder", length_pred)
         
-        actual_lengths = torch.sum(X != 21, dim=1).float() #torch.Size(B)
-        print("[VALIDATION] actual le,gths", actual_lengths)
-        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
-        print("[VALIDATION] predicted lengtghs by decoder", pred_lengths)
-        print("[VALIDATION] predicted lengths rounded", torch.round(pred_lengths))
+        # note that I hard code the max seqlen to 1024 here
+        lengthmask = self.get_mask(length_pred)
 
-        #Messy implementation, but idk how else to calc correctly for each individual protein in the batch
-        recon_losses = []
-        length_losses = []
-        for i, (inputSeq, length, reconSeq, predL) in enumerate(zip(X, actual_lengths, recon_x, pred_lengths)):
-            inputSeq = inputSeq[:int(length)].float() #needs to be float for F.cross_entropy
-            print("inputSeq", inputSeq.shape)
-            recon_seq = reconSeq[:, :int(length.item())].float() #Use real length to splice on reconstructed input, int to round
-            print("recon_seq", recon_seq.shape)
-
-            loss = F.cross_entropy(recon_seq, inputSeq)
-            lengthLoss = F.mse_loss(length, predL)
-            recon_losses.append(loss)
-            length_losses.append(lengthLoss)
-
-        reconstruction_loss = torch.mean(torch.stack(recon_losses))
-        length_loss = torch.mean(torch.stack(length_loss))
+        reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
+        length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
         KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
         loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss #implement weighing factor for length loss?
+        self.log('validation_reconstruction_loss', reconstruction_loss)
+        self.log('validation_KL_divergence', KL_divergence)
+        self.log('validation_length_loss', length_loss)
         self.log('validation_loss', loss)
         return loss
+
+    def get_mask(self, lengths):
+        lengths_clamped = torch.clamp(lengths.detach().squeeze(), min=64, max=1024) # B
+        counter = torch.arange(1024).expand(len(lengths_clamped), -1).to(lengths_clamped.device)
+        mask = counter < lengths_clamped.unsqueeze(1) # B x 1024
+        return mask
+
 
 class VAE_transformer(ModelBackbone):
     def __init__(
@@ -442,7 +387,6 @@ class MultiHeadAttentionLayer(nn.Module):
         
         attention = attention.transpose(1, 2).contiguous().view(B, L, C) # (B, L, nh, hs)
         attention = self.output(attention)
-        print(attention.shape)
         
         return attention
 

@@ -21,25 +21,40 @@ def pad_batch(f, sample, pad_to = 1024):
     sequence = sample["central"]
     length = sample["0/protein_length"]
     sequence = np.concatenate([sequence, np.ones((pad_to - length), dtype=sequence.dtype)])
-    return sequence, length
+    return sequence, length.astype(np.float32)
     
 
 class Uniref50DataModule(pl.LightningDataModule):
-    def __init__(self, path, pad_to = 1024, batch_size=16, n_workers=4):
+    def __init__(self, path, pad_to = 1024, batch_size=16, n_workers=4, subsample = None):
         super().__init__()
         self.n_workers = n_workers
         self.batch_size = batch_size
+        padder = partial(pad_batch, pad_to = pad_to)
 
         subset = h5py.File(path)["0/protein_length"][:] <= pad_to
-        padder = partial(pad_batch, pad_to = pad_to)
+    
         split = h5py.File(path)["unstructured/split"][:] == b"train"
-        self.train = h5torch.Dataset(path, subset = subset & split, sample_processor = padder)
+        subset_train = (
+            subset & split if subsample is None else
+            subset & split & (np.random.rand(len(split)) < subsample)
+        )
+        self.train = h5torch.Dataset(path, subset = subset, sample_processor = padder)
 
         split = h5py.File(path)["unstructured/split"][:] == b"val"
-        self.val = h5torch.Dataset(path, subset = subset & split, sample_processor = padder)
+        subset_val = (
+            subset & split if subsample is None else
+            subset & split & (np.random.rand(len(split)) < subsample)
+        )
+        self.val = h5torch.Dataset(path, subset = subset_val, sample_processor = padder)
 
         split = h5py.File(path)["unstructured/split"][:] == b"test"
-        self.test = h5torch.Dataset(path, subset = subset & split, sample_processor = padder)
+        subset_test = (
+            (subset & split) if subsample is None else
+            (subset & split & (np.random.rand(len(split)) < subsample))
+        )
+
+        self.test = h5torch.Dataset(path, subset = subset_test, sample_processor = padder)
+        print(len(self.train), len(self.val), len(self.test))
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
