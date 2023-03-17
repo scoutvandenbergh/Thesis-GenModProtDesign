@@ -3,7 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
-
+import math
+from rotary_embedding_torch import RotaryEmbedding
 
 class Permute(nn.Module): 
     def __init__(self, *args):
@@ -86,19 +87,11 @@ class VAE(ModelBackbone):
         bottleneck_size = 128, 
         learning_rate = 0.0001, 
         blocks_per_stage = 4,
+        n_heads = 8,
         n_warmup_steps = 1000,
-        beta = 0.001):
-        """
-        This would be my prefered VAE implementation
-        Instead of max poolings it uses strided convs
-        A strided conv where stride = kernel size, functions the same way max pooling does,
-        but then learns filters for the pooling instead of max
+        beta = 0.001,
+        gamma = 1e-05):
 
-        Also for the decoder there is convtranspose1d instead of upsample.
-
-        Take not of how deep this model is with how few parameters. (1.3 mill)
-        This is the power of aggresive pooling (through strided convs)
-        """
         super().__init__(learning_rate = learning_rate, n_warmup_steps = n_warmup_steps)
         self.save_hyperparameters()
         
@@ -106,15 +99,15 @@ class VAE(ModelBackbone):
         self.encoder = nn.Sequential(
             nn.Embedding(vocab_size, hidden_sizes[0]), # gives B x 1024 x 128
             Permute(0,2,1), # B x 128 x 1024
-            *[ResidualBlock(hidden_sizes[0], 5, 0.2) for _ in range(blocks_per_stage)],
-            nn.Conv1d(hidden_sizes[0], hidden_sizes[1], 4, stride = 4), # 1024 -> 256
-            *[ResidualBlock(hidden_sizes[1], 5, 0.2) for _ in range(blocks_per_stage)],
-            nn.Conv1d(hidden_sizes[1], hidden_sizes[2], 4, stride = 4), # 256 -> 64
-            *[ResidualBlock(hidden_sizes[2], 5, 0.2) for _ in range(blocks_per_stage)],
-            nn.Conv1d(hidden_sizes[2], hidden_sizes[3], 4, stride = 4), # 64 -> 16
-            *[ResidualBlock(hidden_sizes[3], 5, 0.2) for _ in range(blocks_per_stage)],
-            nn.Conv1d(hidden_sizes[3], hidden_sizes[4], 4, stride = 4), # 16 -> 4
-            *[ResidualBlock(hidden_sizes[4], 5, 0.2) for _ in range(blocks_per_stage)],
+            *[ResidualBlock(hidden_sizes[0], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)],
+            nn.Conv1d(hidden_sizes[0], hidden_sizes[1], kernel_size = 4, stride = 4), # 1024 -> 256
+            *[ResidualBlock(hidden_sizes[1], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)],
+            nn.Conv1d(hidden_sizes[1], hidden_sizes[2], kernel_size = 4, stride = 4), # 256 -> 64
+            *[ResidualBlock(hidden_sizes[2], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)],
+            nn.Conv1d(hidden_sizes[2], hidden_sizes[3], kernel_size = 4, stride = 4), # 64 -> 16
+            *[ResidualBlock(hidden_sizes[3], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)],
+            nn.Conv1d(hidden_sizes[3], hidden_sizes[4], kernel_size = 4, stride = 4), # 16 -> 4
+            *[ResidualBlock(hidden_sizes[4], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)],
             View(-1, hidden_sizes[4]*4),
             nn.Linear(hidden_sizes[4]*4, bottleneck_size),
             nn.GELU()
@@ -128,19 +121,32 @@ class VAE(ModelBackbone):
             nn.Linear(bottleneck_size, hidden_sizes[4]*4),
             nn.GELU(),
             View(-1, hidden_sizes[4], 4), # put them into B x 256 x 4, just as it was in last conv of encoder
-            *[ResidualBlock(hidden_sizes[4], 5, 0.2) for _ in range(blocks_per_stage)],
-            nn.ConvTranspose1d(hidden_sizes[4], hidden_sizes[3], 4, stride = 4), # 4 -> 16
-            *[ResidualBlock(hidden_sizes[3], 5, 0.2) for _ in range(blocks_per_stage)],
-            nn.ConvTranspose1d(hidden_sizes[3], hidden_sizes[2], 4, stride = 4), # 4 -> 16
-            *[ResidualBlock(hidden_sizes[2], 5, 0.2) for _ in range(blocks_per_stage)],
-            nn.ConvTranspose1d(hidden_sizes[2], hidden_sizes[1], 4, stride = 4), # 4 -> 16
-            *[ResidualBlock(hidden_sizes[1], 5, 0.2) for _ in range(blocks_per_stage)],
-            nn.ConvTranspose1d(hidden_sizes[1], hidden_sizes[0], 4, stride = 4), # 4 -> 16
-            *[ResidualBlock(hidden_sizes[0], 5, 0.2) for _ in range(blocks_per_stage)],
-            nn.Conv1d(hidden_sizes[0], vocab_size, 1), # to output
+            *[ResidualBlock(hidden_sizes[4], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)],
+            nn.ConvTranspose1d(hidden_sizes[4], hidden_sizes[3], kernel_size = 4, stride = 4), # 4 -> 16
+            *[ResidualBlock(hidden_sizes[3], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)],
+            nn.ConvTranspose1d(hidden_sizes[3], hidden_sizes[2], kernel_size = 4, stride = 4), # 4 -> 16
+            *[ResidualBlock(hidden_sizes[2], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)],
+            nn.ConvTranspose1d(hidden_sizes[2], hidden_sizes[1], kernel_size = 4, stride = 4), # 4 -> 16
+            *[ResidualBlock(hidden_sizes[1], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)],
+            nn.ConvTranspose1d(hidden_sizes[1], hidden_sizes[0], kernel_size = 4, stride = 4), # 4 -> 16
+            *[ResidualBlock(hidden_sizes[0], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)],
+            nn.Conv1d(hidden_sizes[0], vocab_size, kernel_size = 1), # to output
+        )
+
+        self.decoderLength = nn.Sequential(
+            nn.Linear(bottleneck_size, 64),
+            nn.GELU(),
+            nn.Linear(64,32),
+            nn.GELU(),
+            nn.Linear(32,16),
+            nn.GELU(),
+            nn.Linear(16,4),
+            nn.GELU(),
+            nn.Linear(4,1)
         )
 
         self.beta = beta
+        self.gamma = gamma
 
     def encode(self, x):
         x = self.encoder(x)
@@ -157,7 +163,225 @@ class VAE(ModelBackbone):
     def forward(self,x):
         mean, logvar = self.encode(x)
         z = self.reparameterize(mean, logvar)
-        return self.decode(z), mean, logvar
+        return self.decode(z), mean, logvar , self.decoderLength(z) #added decodeL to forward pass
+        
+    def training_step(self, batch, batch_idx):
+        X, actual_lengths = batch
+        print("TRAINING STEP")
+        recon_x, mean, log_var, length_pred = self.forward(X)
+        print("[TRAIN] predicted lengths byy decoder", length_pred)
+
+        #actual_lengths = torch.sum(X != 21, dim=1).float() #torch.Size(B)
+        print("[TRAIN] actual lengths", actual_lengths)
+        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+        print("[TRAIN] predicted lengths", pred_lengths)
+        print("[TRAIN] predicted lengths rounded", torch.round(pred_lengths))
+
+        #Messy implementation, but idk how else to calc correctly for each individual protein in the batch
+        recon_losses = []
+        length_losses = []
+        for i, (inputSeq, length, reconSeq, predL) in enumerate(zip(X, actual_lengths, recon_x, pred_lengths)):
+
+            print("Sequence", i)
+            print("original full", X[i], X[i].shape)
+            inputSeq = inputSeq[:int(length)].float() #needs to be float for F.cross_entropy
+            print("real length", inputSeq, inputSeq.shape)
+
+            recon_seq = reconSeq[i, :int(length.item())].float() #Use real length to splice on reconstructed input, int to round
+            print("reconstructed", recon_seq, recon_seq.shape)
+
+            loss = F.cross_entropy(recon_seq, inputSeq)
+            lengthLoss = F.mse_loss(length, predL)
+            print(loss)
+            recon_losses.append(loss)
+            length_losses.append(lengthLoss)
+
+        reconstruction_loss = torch.mean(torch.stack(recon_losses))
+        length_loss = torch.mean(torch.stack(length_loss))
+        KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+
+        loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss #implement weighing factor for length loss?
+        self.log('train_loss', loss)
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        X, actual_lengths = batch
+        print("[TEST] STEP")
+        recon_x, mean, log_var, length_pred = self.forward(X)
+        print("[TEST] predicted lengths by decoder", length_pred)
+
+        #actual_lengths = torch.sum(X != 21, dim=1).float() #torch.Size(B)
+        print("[TEST] actual lengths", actual_lengths)
+        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+        print("[TEST] predicted lengths by decoder real", pred_lengths)
+        print("[TEST] predicted lengths rounded", torch.round(pred_lengths))
+
+        #Messy implementation, but idk how else to calc correctly for each individual protein in the batch
+        recon_losses = []
+        length_losses = []
+        for i, (inputSeq, length, reconSeq, predL) in enumerate(zip(X, actual_lengths, recon_x, pred_lengths)):
+            inputSeq = inputSeq[:int(length)].float() #needs to be float for F.cross_entropy
+            print(inputSeq.shape)
+            recon_seq = reconSeq[i, :int(length.item())].float() #Use real length to splice on reconstructed input, int to round
+            print(recon_seq.shape)
+
+            loss = F.cross_entropy(recon_seq, inputSeq)
+            lengthLoss = F.mse_loss(length, predL)
+            recon_losses.append(loss)
+            length_losses.append(lengthLoss)
+
+        reconstruction_loss = torch.mean(torch.stack(recon_losses))
+        length_loss = torch.mean(torch.stack(length_loss))
+        KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+
+        loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss #implement weighing factor for length loss?
+        self.log('test_loss', loss)
+        return loss
+
+    def validation_step(self, batch, batch_idx): 
+        X, actual_lengths = batch
+        print("VALIDATION STEP")
+        recon_x, mean, log_var, length_pred = self.forward(X)
+        print("recon_x", recon_x, recon_x.shape)
+        print("[VALIDATION] predicted length by decoder", length_pred)
+        
+        actual_lengths = torch.sum(X != 21, dim=1).float() #torch.Size(B)
+        print("[VALIDATION] actual le,gths", actual_lengths)
+        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+        print("[VALIDATION] predicted lengtghs by decoder", pred_lengths)
+        print("[VALIDATION] predicted lengths rounded", torch.round(pred_lengths))
+
+        #Messy implementation, but idk how else to calc correctly for each individual protein in the batch
+        recon_losses = []
+        length_losses = []
+        for i, (inputSeq, length, reconSeq, predL) in enumerate(zip(X, actual_lengths, recon_x, pred_lengths)):
+            inputSeq = inputSeq[:int(length)].float() #needs to be float for F.cross_entropy
+            print("inputSeq", inputSeq.shape)
+            recon_seq = reconSeq[:, :int(length.item())].float() #Use real length to splice on reconstructed input, int to round
+            print("recon_seq", recon_seq.shape)
+
+            loss = F.cross_entropy(recon_seq, inputSeq)
+            lengthLoss = F.mse_loss(length, predL)
+            recon_losses.append(loss)
+            length_losses.append(lengthLoss)
+
+        reconstruction_loss = torch.mean(torch.stack(recon_losses))
+        length_loss = torch.mean(torch.stack(length_loss))
+        KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+
+        loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss #implement weighing factor for length loss?
+        self.log('validation_loss', loss)
+        return loss
+
+class VAE_transformer(ModelBackbone):
+    def __init__(
+        self,
+        vocab_size = 21, 
+        hidden_sizes = [64, 128, 256, 512, 1024], 
+        bottleneck_size = 128, 
+        learning_rate = 0.0001, 
+        blocks_per_stage = 4,
+        n_heads = 8,
+        n_warmup_steps = 1000,
+        beta = 0.001,
+        gamma = 1e-05):
+
+        super().__init__(learning_rate = learning_rate, n_warmup_steps = n_warmup_steps)
+        self.save_hyperparameters()
+        
+
+        self.encoder = nn.Sequential(
+            nn.Embedding(vocab_size, hidden_sizes[0]), # gives B x 1024 x 128
+            Permute(0,2,1), # B x 128 x 1024
+            #*[ResidualBlock(hidden_sizes[0], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)],
+            Permute(0,2,1),
+            *[TransformerRoPE(hidden_sizes[0], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            Permute(0,2,1),
+            nn.Conv1d(hidden_sizes[0], hidden_sizes[1], kernel_size = 4, stride = 4), # 1024 -> 256
+            Permute(0,2,1),
+            *[TransformerRoPE(hidden_sizes[1], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            Permute(0,2,1),
+            nn.Conv1d(hidden_sizes[1], hidden_sizes[2], kernel_size = 4, stride = 4), # 256 -> 64
+            Permute(0,2,1),
+            *[TransformerRoPE(hidden_sizes[2], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            Permute(0,2,1),
+            nn.Conv1d(hidden_sizes[2], hidden_sizes[3], kernel_size = 4, stride = 4), # 64 -> 16
+            Permute(0,2,1),
+            *[TransformerRoPE(hidden_sizes[3], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            Permute(0,2,1),
+            nn.Conv1d(hidden_sizes[3], hidden_sizes[4], kernel_size = 4, stride = 4), # 16 -> 4
+            Permute(0,2,1),
+            *[TransformerRoPE(hidden_sizes[4], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            Permute(0,2,1),
+            View(-1, hidden_sizes[4]*4),
+            nn.Linear(hidden_sizes[4]*4, bottleneck_size),
+            nn.GELU()
+        )
+        
+        self.lin_mu = nn.Linear(bottleneck_size, bottleneck_size)
+        self.lin_var = nn.Linear(bottleneck_size, bottleneck_size)
+
+        # note that I use quite mirrored encoder and decoder here
+        self.decoder = nn.Sequential(
+            nn.Linear(bottleneck_size, hidden_sizes[4]*4),
+            nn.GELU(),
+            View(-1, hidden_sizes[4], 4), # put them into B x 256 x 4, just as it was in last conv of encoder
+            Permute(0,2,1),
+            *[TransformerRoPE(hidden_sizes[4], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            Permute(0,2,1),
+            nn.ConvTranspose1d(hidden_sizes[4], hidden_sizes[3], kernel_size = 4, stride = 4), # 4 -> 16
+            Permute(0,2,1),
+            *[TransformerRoPE(hidden_sizes[3], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            Permute(0,2,1),
+            nn.ConvTranspose1d(hidden_sizes[3], hidden_sizes[2], kernel_size = 4, stride = 4), # 4 -> 16
+            Permute(0,2,1),
+            *[TransformerRoPE(hidden_sizes[2], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            Permute(0,2,1),
+            nn.ConvTranspose1d(hidden_sizes[2], hidden_sizes[1], kernel_size = 4, stride = 4), # 4 -> 16
+            Permute(0,2,1),
+            *[TransformerRoPE(hidden_sizes[1], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            Permute(0,2,1),
+            nn.ConvTranspose1d(hidden_sizes[1], hidden_sizes[0], kernel_size = 4, stride = 4), # 4 -> 16
+            Permute(0,2,1),
+            *[TransformerRoPE(hidden_sizes[0], n_heads, dropout = 0.2) for _ in range(blocks_per_stage)],
+            Permute(0,2,1),
+            nn.Conv1d(hidden_sizes[0], vocab_size, kernel_size = 1), # to output
+        )
+
+        # self.decoderL = nn.Sequential(
+        #     nn.Linear(bottleneck_size, 64),
+        #     nn.GELU(),
+        #     nn.Linear(64,32),
+        #     nn.GELU(),
+        #     nn.Linear(32,16),
+        #     nn.GELU(),
+        #     nn.Linear(16,4),
+        #     nn.GELU(),
+        #     nn.Linear(4,1)
+        # )
+
+        self.beta = beta
+        self.gamma = gamma
+
+    def encode(self, x):
+        x = self.encoder(x)
+        return self.lin_mu(x), self.lin_var(x)
+    
+    def decode(self, x):
+        return self.decoder(x)
+    
+    # def decodeL(self, x):
+    #     return self.decodeL(x) #added to predict length of protein without padding
+
+    def reparameterize(self, mean, logvar):
+        std = torch.exp(0.5*logvar)
+        eps = torch.randn_like(std)
+        return mean + eps*std
+    
+    def forward(self,x):
+        mean, logvar = self.encode(x)
+        z = self.reparameterize(mean, logvar)
+        return self.decode(z), mean, logvar #, self.decodeL(z) #added decodeL to forward pass
         
     def training_step(self, batch, batch_idx):
         X, _ = batch
@@ -165,17 +389,17 @@ class VAE(ModelBackbone):
         reconstruction_loss = F.cross_entropy(recon_x, X)
         KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
-        loss = reconstruction_loss + self.beta * KL_divergence
+        loss = reconstruction_loss + self.beta * KL_divergence #implement loss for correct length
         self.log('train_loss', loss)
         return loss
 
-    def validation_step(self, batch, batch_idx): #need batch_idx? otherwise errors
-        X, _ = batch
+    def validation_step(self, batch, batch_idx): 
+        X, _ = batch #X, length
         recon_x, mean, log_var = self.forward(X)
         reconstruction_loss = F.cross_entropy(recon_x, X)
         KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
-        loss = reconstruction_loss + self.beta * KL_divergence
+        loss = reconstruction_loss + self.beta * KL_divergence #implement loss for correct length
         self.log('val_loss', loss)
         return loss
 
@@ -185,6 +409,133 @@ class VAE(ModelBackbone):
         reconstruction_loss = F.cross_entropy(recon_x, X)
         KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
-        loss = reconstruction_loss + self.beta * KL_divergence
+        loss = reconstruction_loss + self.beta * KL_divergence #implement loss for correct length
         self.log('test_loss', loss)
         return loss
+
+class MultiHeadAttentionLayer(nn.Module):
+    def __init__(self, hidden_size, n_heads, dropout):
+        super().__init__()
+        
+        assert hidden_size % n_heads == 0
+        
+        self.hidden_size = hidden_size
+        self.n_heads = n_heads
+        self.head_dim = hidden_size // n_heads
+        
+        self.kqv = nn.Linear(hidden_size, hidden_size * 3, bias=False) 
+        self.output = nn.Linear(hidden_size, hidden_size)
+        
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, x):
+        B, L, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+        k, q, v = self.kqv(x).chunk(3, dim=-1)
+        
+        k = k.view(B, L, self.n_heads, self.head_dim).transpose(1, 2) # (B, nh, L, hs)
+        q = q.view(B, L, self.n_heads, self.head_dim).transpose(1, 2) # (B, nh, L, hs)
+        v = v.view(B, L, self.n_heads, self.head_dim).transpose(1, 2) # (B, nh, L, hs)
+
+        attn = torch.matmul(q, k.transpose(-2,-1)) * x.size(-1)**0.5 #(B, nh, L, hs) x (B, nh, hs, L) -> (B, nh, L, L)
+        attention = F.softmax(attn, dim=-1)
+        attention = torch.matmul(self.dropout(attention), v) #(B, nh, L, hs)
+        
+        attention = attention.transpose(1, 2).contiguous().view(B, L, C) # (B, L, nh, hs)
+        attention = self.output(attention)
+        print(attention.shape)
+        
+        return attention
+
+class RoPEMultiHeadAttentionLayer(nn.Module):
+    def __init__(self, hidden_size, n_heads, dropout): #add argument to choose for rotary or abs, or relative, or learned
+        super().__init__()
+        
+        assert hidden_size % n_heads == 0
+        
+        self.hidden_size = hidden_size
+        self.n_heads = n_heads
+        self.head_dim = hidden_size // n_heads
+        
+        self.kqv = nn.Linear(hidden_size, hidden_size * 3, bias=False) 
+        self.output = nn.Linear(hidden_size, hidden_size)
+        
+        self.dropout = nn.Dropout(dropout)
+        self.rotary_emb = RotaryEmbedding(dim=self.head_dim)
+        
+    def forward(self, x):
+        B, L, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+        k, q, v = self.kqv(x).chunk(3, dim=-1)
+        
+        k = k.view(B, L, self.n_heads, self.head_dim).transpose(1, 2) # (B, nh, L, hs)
+        q = q.view(B, L, self.n_heads, self.head_dim).transpose(1, 2) # (B, nh, L, hs)
+        v = v.view(B, L, self.n_heads, self.head_dim).transpose(1, 2) # (B, nh, L, hs)
+        
+        q = self.rotary_emb.rotate_queries_or_keys(q)
+        k = self.rotary_emb.rotate_queries_or_keys(k)
+
+        attn = torch.matmul(q, k.transpose(-2,-1)) * k.size(-1)**0.5 #(B, nh, L, hs) x (B, nh, hs, L) -> (B, nh, L, L)
+        attention = F.softmax(attn, dim=-1)
+        attention = torch.matmul(self.dropout(attention), v) #(B, nh, L, hs)
+        
+        attention = attention.transpose(1, 2).contiguous().view(B, L, C) # (B, L, nh, hs)
+        attention = self.output(attention)
+        
+        return attention
+    
+class TransformerRoPE(nn.Module):
+    def __init__(self, hidden_size, n_heads, dropout):
+        super().__init__()
+        self.ln1 = nn.LayerNorm(hidden_size)
+        self.ln2 = nn.LayerNorm(hidden_size)
+        self.RoPE_MHA = RoPEMultiHeadAttentionLayer(hidden_size, n_heads, dropout)
+        self.ffn = nn.Sequential(
+            SwiGLU(hidden_size),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size*4, hidden_size)      
+        )
+        
+    def forward(self, x):
+        pre_ln = self.ln1(x)
+        attn = self.RoPE_MHA(pre_ln)
+        residual = attn + x
+
+        pre_ln = self.ln2(residual)
+        ffn = self.ffn(pre_ln)
+        output = ffn + residual
+        return output
+    
+class GLU(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, input_dim * 2)
+
+    def forward(self, x):
+        gates = self.linear(x).chunk(2, dim=-1) #split into 2 parts
+        #sigmoid(xW + b) * (xV+c)
+        activation = torch.sigmoid(gates[0]) * gates[1]
+        return activation
+
+class SwiGLU(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, input_dim * 8)
+        self.beta = nn.Parameter(torch.ones(input_dim * 4))
+        #nn.Parameter tells pytorch to train this parameter
+
+    def forward(self, x):
+        gates = self.linear(x).chunk(2, dim=-1) #split into 2 parts
+        #Swish_beta(xW+b) * (xV+c)
+        activation = (gates[0] * torch.sigmoid(self.beta * gates[1])) * gates[1]
+        return activation
+
+class GeGLU(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, input_dim * 2)
+
+    def forward(self, x):
+        gates = self.linear(x).chunk(2, dim=-1) #split into 2 parts
+        #GELU(xW+b)*(xV+c), GELU from https://arxiv.org/abs/1606.08415
+        activation = (0.5 * gates[0] * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (gates[0] + 0.044715 * torch.pow(gates[0], 3.0))))) * gates[1] #approx
+        #activation = gates[0] * 1/2 * (1 + torch.erf(gates[0] / (math.sqrt(2)))) * gates[1] #more exact?
+        return activation

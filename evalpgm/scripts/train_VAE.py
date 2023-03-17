@@ -1,7 +1,7 @@
 import sys
 import pytorch_lightning as pl
 from evalpgm.data import Uniref50DataModule
-from evalpgm.models import VAE
+from evalpgm.models import VAE, VAE_transformer
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.callbacks import EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger
@@ -9,17 +9,19 @@ from pytorch_lightning.loggers import TensorBoardLogger
 data_path = str(sys.argv[1])
 logs_path = str(sys.argv[2])
 
-dm = Uniref50DataModule(data_path, batch_size = 256, n_workers = 8)
+dm = Uniref50DataModule(data_path, batch_size = 4, n_workers = 8)
 
-# model
+# model or use VAE_transformer
 model = VAE(
     vocab_size = 33, 
     hidden_sizes = [16, 32, 64, 128, 256], 
     bottleneck_size = 128, 
     learning_rate = 5e-4, 
     blocks_per_stage = 2,
+    n_heads = 8,
     n_warmup_steps = 1000,
     beta = 0.001)
+
 
 callbacks = [
     ModelCheckpoint(monitor="val_loss", mode="min"),
