@@ -38,7 +38,7 @@ class Uniref50DataModule(pl.LightningDataModule):
             subset & split if subsample is None else
             subset & split & (np.random.rand(len(split)) < subsample)
         )
-        self.train = h5torch.Dataset(path, subset = subset, sample_processor = padder)
+        self.train = h5torch.Dataset(path, subset = subset_train, sample_processor = padder)
 
         split = h5py.File(path)["unstructured/split"][:] == b"val"
         subset_val = (
@@ -54,7 +54,7 @@ class Uniref50DataModule(pl.LightningDataModule):
         )
 
         self.test = h5torch.Dataset(path, subset = subset_test, sample_processor = padder)
-        print(len(self.train), len(self.val), len(self.test))
+        print("Train set", len(self.train), "Validation set", len(self.val), "Test set", len(self.test))
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(

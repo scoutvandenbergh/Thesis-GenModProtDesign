@@ -9,11 +9,11 @@ from pytorch_lightning.loggers import TensorBoardLogger
 data_path = str(sys.argv[1])
 logs_path = str(sys.argv[2])
 
-dm = Uniref50DataModule(data_path, batch_size = 4, n_workers = 8, subsample = None)
+dm = Uniref50DataModule(data_path, batch_size = 256, n_workers = 8, subsample = 0.01)
 # Can also use subsample = 0.001 to use 0.1% of the data for quick testing
 
 # model or use VAE_transformer
-model = VAE(
+model = VAE_transformer(
     vocab_size = 33, 
     hidden_sizes = [16, 32, 64, 128, 256], 
     bottleneck_size = 128, 
@@ -33,12 +33,12 @@ logger = TensorBoardLogger(
 )
 
 trainer = pl.Trainer(
-	max_steps=500_000,
+	max_steps=500000,
 	accelerator="gpu",
     logger = logger,
-    val_check_interval=10_000,
+    val_check_interval=1000,
     check_val_every_n_epoch=None,
-	devices=[1], # This selects the second gpu on nvidia-smi
+	devices=[0], # [1] This selects the second gpu on nvidia-smi
     callbacks=callbacks)
 
 #tensorboard --logdir logs in terminal --> not showing up anything in browser
