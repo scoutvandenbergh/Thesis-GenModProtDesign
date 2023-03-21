@@ -28,8 +28,8 @@ This last script will create a HDF5 file `uniref50.h5t` containing the Uniref50 
 
 
 ## TODO list
-- [ ] Add a second decoder that decodes one number: the protein length. Optimize its MSE of true protein lengths jointly with the reconstruction loss + KL Div Loss. Also cut off the reconstruction loss up to where the protein ends.
-- [ ] Transformers: apply rotary positional embeddings, gated linear units, memory efficient self attention.
+- [x] Add a second decoder that decodes one number: the protein length. Optimize its MSE of true protein lengths jointly with the reconstruction loss + KL Div Loss. Also cut off the reconstruction loss up to where the protein ends.
+- [x] Transformers: apply rotary positional embeddings, gated linear units, memory efficient self attention.
 - [ ] FID --> FAD/FED
 - [ ] VAE --> VQ-VAE
 - [ ] VQ-VAE --> conditional VQ-VAE
