@@ -27,6 +27,7 @@ def pad_batch(f, sample, pad_to = 1024):
 class Uniref50DataModule(pl.LightningDataModule):
     def __init__(self, path, pad_to = 1024, batch_size=16, n_workers=4, subsample = None):
         super().__init__()
+        self.save_hyperparameters()
         self.n_workers = n_workers
         self.batch_size = batch_size
         padder = partial(pad_batch, pad_to = pad_to)

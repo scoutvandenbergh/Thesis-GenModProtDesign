@@ -5,6 +5,9 @@ from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 import math
 from rotary_embedding_torch import RotaryEmbedding
+#from pytorch_lightning.tuner import Tuner #can use to automatically find best lr (check documentation)
+
+#tuner.scale_batch_size(model, mode="power") find max batch size by doubling batch size until OOM
 
 
 class Permute(nn.Module): 
@@ -22,6 +25,12 @@ class View(nn.Module):
 
     def forward(self, x):
         return x.reshape(*self.args)
+    
+def swish(x, beta):
+    return x * 1/(1+torch.exp(-x * beta))
+
+def gelu(x):
+    return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3.0))))
 
 class ResidualBlock(nn.Module):
     def __init__(self, hidden_dim = 64, kernel_size = 5, dropout = 0.2):
@@ -42,6 +51,7 @@ class ResidualBlock(nn.Module):
 class ModelBackbone(pl.LightningModule):
     def __init__(self, learning_rate = 0.0001, n_warmup_steps = 1000):
         super().__init__()
+        self.save_hyperparameters()
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
@@ -143,13 +153,23 @@ class RoPEMultiHeadAttentionLayer(nn.Module):
         return attention
     
 class TransformerRoPE(nn.Module):
-    def __init__(self, hidden_size, n_heads, dropout):
+    def __init__(self, hidden_size, n_heads, dropout, beta_swi, activation = "SwiGLU"):
         super().__init__()
         self.ln1 = nn.LayerNorm(hidden_size)
         self.ln2 = nn.LayerNorm(hidden_size)
         self.RoPE_MHA = RoPEMultiHeadAttentionLayer(hidden_size, n_heads, dropout)
+
+        if activation == "SwiGLU":
+            self.activation = SwiGLU(hidden_size, beta_swi)
+        elif activation == "GeGLU":
+            self.activation = GeGLU(hidden_size)
+        elif activation == "GLU":
+            self.activation = GLU(hidden_size)
+        else:
+            raise ValueError("Choose activation as 'SwiGLU', 'GeLU' or 'GLU'. \n")
+
         self.ffn = nn.Sequential(
-            SwiGLU(hidden_size),
+            self.activation,
             nn.Dropout(dropout),
             nn.Linear(hidden_size*4, hidden_size)      
         )
@@ -170,23 +190,21 @@ class GLU(nn.Module):
         self.linear = nn.Linear(input_dim, input_dim * 8)
 
     def forward(self, x):
-        gates = self.linear(x).chunk(2, dim=-1) #split into 2 parts
-        #sigmoid(xW + b) * (xV+c)
-        activation = torch.sigmoid(gates[0]) * gates[1]
-        return activation
+        x, gate = self.linear(x).chunk(2, dim=-1) #split into 2 parts
+        return x * torch.sigmoid(gate)
 
 class SwiGLU(nn.Module):
-    def __init__(self, input_dim):
+    def __init__(self, input_dim, beta_swi = 1):
         super().__init__()
         self.linear = nn.Linear(input_dim, input_dim * 8)
-        self.beta = nn.Parameter(torch.ones(input_dim * 4))
-        #nn.Parameter tells pytorch to train this parameter
+        if beta_swi == None:
+            self.beta = nn.Parameter(torch.ones(input_dim * 4))
+        else:
+            self.beta = beta_swi
 
     def forward(self, x):
-        gates = self.linear(x).chunk(2, dim=-1) #split into 2 parts
-        #Swish_beta(xW+b) * (xV+c)
-        activation = (gates[0] * torch.sigmoid(self.beta * gates[1])) * gates[1]
-        return activation
+        x, gate = self.linear(x).chunk(2, dim=-1) #split into 2 parts
+        return x * swish(gate, self.beta)
 
 class GeGLU(nn.Module):
     def __init__(self, input_dim):
@@ -194,8 +212,6 @@ class GeGLU(nn.Module):
         self.linear = nn.Linear(input_dim, input_dim * 8)
 
     def forward(self, x):
-        gates = self.linear(x).chunk(2, dim=-1) #split into 2 parts
-        #GELU(xW+b)*(xV+c), GELU from https://arxiv.org/abs/1606.08415
-        activation = (0.5 * gates[0] * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (gates[0] + 0.044715 * torch.pow(gates[0], 3.0))))) * gates[1] #approx
-        #activation = gates[0] * 1/2 * (1 + torch.erf(gates[0] / (math.sqrt(2)))) * gates[1] #more exact?
-        return activation
+        x, gate = self.linear(x).chunk(2, dim=-1) #split into 2 parts
+        #activation = x * (gate * 1/2 * (1 + torch.erf(gate / (math.sqrt(2)))) #more exact?
+        return x * gelu(gate)
