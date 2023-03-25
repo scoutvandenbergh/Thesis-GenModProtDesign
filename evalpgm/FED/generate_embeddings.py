@@ -62,5 +62,5 @@ print("Average time per sequence: ", sum(times_embeddings)/len(times_embeddings)
 # 681.4922761917114 517
 # Average time per batch of 16 proteins through esm2_t33_650M_UR50D:  1.3181668785139486
 # Average time per sequence:  0.08238542990712179
-# But runtime of tqdm was 42:05 for 517 batches... 
+# But runtime of tqdm was 42:05 for 517 batches...  
 

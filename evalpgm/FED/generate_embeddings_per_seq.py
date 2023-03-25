@@ -44,4 +44,4 @@ for i, tokens_len in enumerate(lengths):
 torch.save(sequence_representations, avg_embeddings_path)
 print(sequence_representations)
 
-#Placeholder file, look for correct code @generate_embeddings.py
+#Placeholder file, look for correct code @generate_embeddings.py 
