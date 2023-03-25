@@ -36,7 +36,7 @@ This last script will create a HDF5 file `uniref50.h5t` containing the Uniref50 
       Question: Can we pre-compute the 200k test embeddings and just sample the generated embeddings, resulting in using the same 200k test embeddings 50 times and having new randomly sampled generated embeddings 50 times?
 
       - [ ] esm2_t6_8M_UR50D vs esm2_t12_35M_UR50D vs esm2_t30_150M_UR50D vs esm2_t33_650M_UR50D vs esm2_t36_3B_UR50D vs esm2_t48_15B_UR50D vs esm2_t36_3B_UR50D+ESMFold
-      Track runtime to calculate embeddings averaged per sequence + time to compute FED once or 50x for the optimal gen vs test ratio @150M or @650M ESM2 model
+      Track runtime to calculate embeddings averaged per sequence + time to compute FED once or 50x for the optimal gen vs test ratio @150M or @650M ESM2 model 
 
       - [ ] Compare basic VAE --> beta-VAE last semester --> beta-VAE this semester --> beta-VAE this semester + length pred --> beta-VAE + transformers + RoPE --> beta-VAE + transformers + other positional embeddings --> proteinGAN --> ProGen2 --> ...
 
