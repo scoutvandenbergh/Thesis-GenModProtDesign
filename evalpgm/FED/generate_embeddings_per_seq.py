@@ -34,13 +34,14 @@ torch.save(results["representations"][33], embeddings_path)
 print(results["representations"][33].shape)
 
 # Generate per-sequence representations via averaging
-# NOTE: token 0 is always a beginning-of-sequence token, so the first residue is token 1.
 sequence_representations = []
 lengths = torch.from_numpy(np.array([int(x[1]) for x in dm.test]))
 print(lengths, type(lengths))
 
 for i, tokens_len in enumerate(lengths):
-    sequence_representations.append(token_representations[i, 1 : tokens_len - 1].mean(0))
+    sequence_representations.append(token_representations[i, 0 : tokens_len].mean(0))
     print(sequence_representations, sequence_representations[0].size())
 torch.save(sequence_representations, avg_embeddings_path)
 print(sequence_representations)
+
+#Placeholder file, look for correct code @generate_embeddings.py
