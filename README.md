@@ -14,8 +14,8 @@ Now you have installed anything under "evalpgm" as a package and can use it in a
 - `scripts/` contains scripts to process data and train models.
 
 ## How to download and process Uniref50
-- [Download link for Uniref](https://www.uniprot.org/help/downloads) (Uniref50 fasta format, accessed 18 Jan 2023)
-- [Download link for pre-training split](https://github.com/facebookresearch/esm#available-pretraining-split) (UniRef50 IDs of evaluation set, accessed 18 Jan 2023)
+- [Download link for Uniref](https://www.uniprot.org/help/downloads) (Uniref50 fasta format, accessed 23 Mar 2023)
+- [Download link for pre-training split](https://github.com/facebookresearch/esm#available-pretraining-split) (UniRef50 IDs of evaluation set, accessed 23 Mar 2023)
 - unzip both files using `gunzip *file*`
 - Run `python evalpgm/process_Uniref.py *path_to_uniref_fasta* *path_to_split_txt*`
 
