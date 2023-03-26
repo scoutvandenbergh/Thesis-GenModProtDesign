@@ -12,16 +12,17 @@ data_path = str(sys.argv[1])
 output_path = str(sys.argv[2])
 
 #embeddings_path = output_path + "/emb_esm2_t33_650M_UR50D_subsample0_01.t"
-avg_embeddings_path = output_path + "/avg_per_seq_emb_esm2_t33_650M_UR50D_subsample0_25.t"
+avg_embeddings_path = output_path + "/COMPLETE_avg_per_seq_emb_esm2_t33_650M_UR50D.t"
 
 
 batch_size = 16
-dm = Uniref50DataModule(data_path, batch_size = batch_size, n_workers = 8, subsample = 0.25)
+dm = Uniref50DataModule(data_path, batch_size = batch_size, n_workers = 8, subsample = None)
 print("data splitted \n")
 
 test = torch.cat([torch.tensor(x[0]) for x in dm.test_dataloader()])
 print(test.shape)
-dataloader = torch.utils.data.DataLoader(test, batch_size=batch_size, pin_memory=True, shuffle=False)
+dataloader = torch.utils.data.DataLoader(test, batch_size=batch_size, pin_memory=True, shuffle=False) #Should be true I think, to compare 200k test samples vs 5-50-500-5k-50k-300k test
+#NOTE: not a problem anymore using emb[torch.randperm(emb.shape[0])]
 
 # Load ESM-2 model
 model, alphabet = esm.pretrained.esm2_t33_650M_UR50D() ##33 layer transformer with 650M params trained on UniRef50D
@@ -63,4 +64,12 @@ print("Average time per sequence: ", sum(times_embeddings)/len(times_embeddings)
 # Average time per batch of 16 proteins through esm2_t33_650M_UR50D:  1.3181668785139486
 # Average time per sequence:  0.08238542990712179
 # But runtime of tqdm was 42:05 for 517 batches...  
+
+# Output for 25% of data:
+# torch.Size([204004, 1280])
+# 17058.13907957077 12751
+# Average time per batch of 16 proteins through esm2_t33_650M_UR50D:  1.3377883365673884
+# Average time per sequence:  0.08361177103546177
+# But runtime of tqdm was 17:35:33 for 12751 batches...
+
 
