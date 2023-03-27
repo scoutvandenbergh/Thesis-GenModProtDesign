@@ -26,20 +26,20 @@ def calc_FED(mu_real, sigma_real, mu_gen, sigma_gen):
             raise ValueError('Imaginary component {}'.format(m))
         covmean = covmean.real
     FED = np.sum((mu_real - mu_gen)**2) + np.trace(sigma_real + sigma_gen - 2 * covmean)
+    print("Fréchet ESM Distance: ", FED)
     return FED
 
-avg_emb_esm2_t33_650M_UR50D = torch.load("Thesis-GenModProtDesign/evalpgm/FED/avg_per_seq_emb_esm2_t33_650M_UR50D_subsample0_01.t") # Average FED over 50 cycles: 0.278
-#avg_emb_esm2_t33_650M_UR50D = torch.load("Thesis-GenModProtDesign/evalpgm/FED/avg_per_seq_emb_esm2_t33_650M_UR50D_subsample0_25.t") # Average FED over 50 cycles: 0.012
-
+#avg_emb_esm2_t33_650M_UR50D = torch.load("Thesis-GenModProtDesign/evalpgm/FED/avg_per_seq_emb_esm2_t33_650M_UR50D_subsample0_01.t") # Average FED over 50 cycles: 0.277, stdev: 0.007
+avg_emb_esm2_t33_650M_UR50D = torch.load("Thesis-GenModProtDesign/evalpgm/FED/avg_per_seq_emb_esm2_t33_650M_UR50D_subsample0_25.t") # Average FED over 50 cycles: 0.012, stdev = 0.000
 
 with open('FED_650M_200k_50_cycles.txt', 'a') as f:
-    f.write(f"FED calculation using esm2_t33_650M_UR50D embeddings on 1% of test data split as 1652 'generated' samples and 6610 'real' samples. \n")
+    f.write(f"FED calculation using esm2_t33_650M_UR50D embeddings on 25% of test data split as 40800 'generated' samples and 163204 'real' samples. \n")
     f.flush()
 
 cycles = 50
 list_FED = []
 
-for i in range(cycles):
+for i in range(cycles): #cycle over random seed for better reproducibility
     print(i)
     avg_emb_esm2_t33_650M_UR50D = avg_emb_esm2_t33_650M_UR50D[torch.randperm(avg_emb_esm2_t33_650M_UR50D.shape[0])] #Shuffle (dataloader was not shuffled)
     gen = avg_emb_esm2_t33_650M_UR50D[0:avg_emb_esm2_t33_650M_UR50D.shape[0]//5].numpy()
@@ -59,4 +59,7 @@ print("Average FED over", cycles, "cycles:", np.round(sum(list_FED)/len(list_FED
 
 with open('FED_650M_200k_50_cycles.txt', 'a') as f:
     f.write(f"Average FED over {cycles} cycles: {np.round(sum(list_FED)/len(list_FED), decimals=3)} \n")
+    f.write(f"Standard deviation of FED over {cycles} cycles: {np.std(list_FED)} \t rounded: {np.round(np.std(list_FED), decimals=3)} \n")
     f.flush()
+
+#USE STDEV OR CONFIDENCE INTERVALS?

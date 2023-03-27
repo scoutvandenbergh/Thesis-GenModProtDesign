@@ -157,7 +157,7 @@ class RoPEMultiHeadAttentionLayer(nn.Module):
         attention = F.softmax(attn, dim=-1)
         attention = torch.matmul(self.dropout(attention), v) #(B, nh, L, hs)
         
-        attention = attention.transpose(1, 2).contiguous().view(B, L, C) # (B, L, nh, hs)
+        attention = attention.transpose(1, 2).contiguous().view(B, L, C) # (B, L, nh, hs) 
         attention = self.output(attention)
         
         return attention

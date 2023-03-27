@@ -43,7 +43,7 @@ class VAE(ModelBackbone):
         self.lin_var = nn.Linear(bottleneck_size, bottleneck_size)
 
         self.decoder = nn.Sequential(
-            nn.Linear(bottleneck_size, hidden_sizes[4]*4), # B x 1024*4
+            nn.Linear(bottleneck_size, hidden_sizes[4]*4), # B x 1024*4 
             newGELU(),
             View(-1, hidden_sizes[4], 4), # B x 1024 x 4
             *[ResidualBlock(hidden_sizes[4], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)], # B x 1024 x 4

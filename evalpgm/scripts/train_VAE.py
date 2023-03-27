@@ -25,7 +25,7 @@ activations = ["SwiGLU", "SwiGLU_train_beta", "GeGLU"]
 counter = 1
 
 dm = Uniref50DataModule(data_path, batch_size = 256, n_workers = 8, subsample = 0.001)
-# Can also use subsample = 0.001 to use 0.1% of the data for quick testing
+# Can also use subsample = 0.001 to use 0.1% of the data for quick testing 
 
 for model_class in models:
     for activation in activations:
