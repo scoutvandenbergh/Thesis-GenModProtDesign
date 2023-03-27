@@ -220,7 +220,7 @@ class TransformerRoPE_Parallel(nn.Module): #ask Gaetan if correct
             nn.Linear(hidden_size*4, hidden_size)      
         )
         
-    def forward(self, x): #as in ProGen2, GPT-J, PaLM, ...
+    def forward(self, x): #as in ProGen2, GPT-J, PaLM, ... 
         pre_ln = self.ln1(x)
         ffn = self.ffn(pre_ln)
 

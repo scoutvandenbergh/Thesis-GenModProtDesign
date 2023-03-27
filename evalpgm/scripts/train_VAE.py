@@ -32,7 +32,7 @@ for model_class in models:
         for lr in learning_rates:
             for beta in betas:
                 for gamma in gammas:
-                    # VAE or use VAE_transformer or use VAE_transformer_Parallel
+                    # VAE or use VAE_transformer or use VAE_transformer_Parallel 
                     model = model_class(
                         vocab_size = 33, 
                         hidden_sizes = [16, 32, 64, 128, 256], 

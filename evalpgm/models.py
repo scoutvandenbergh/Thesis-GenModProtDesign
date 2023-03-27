@@ -35,7 +35,7 @@ class VAE(ModelBackbone):
             nn.Conv1d(hidden_sizes[3], hidden_sizes[4], kernel_size = 4, stride = 4), # B x 1024 x 4
             *[ResidualBlock(hidden_sizes[4], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)], # B x 1024 x 4
             View(-1, hidden_sizes[4]*4), # B x 1024*4
-            nn.Linear(hidden_sizes[4]*4, bottleneck_size), # B x 128
+            nn.Linear(hidden_sizes[4]*4, bottleneck_size), # B x 128 
             newGELU()
         )
         
