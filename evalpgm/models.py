@@ -434,7 +434,7 @@ class VAE_transformer_Parallel(ModelBackbone):
     def test_step(self, batch, batch_idx):
         X, actual_lengths = batch
         recon_x, mean, log_var, length_pred = self.forward(X)
-        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1]) 
 
         lengthmask = self.get_mask(actual_lengths)
 

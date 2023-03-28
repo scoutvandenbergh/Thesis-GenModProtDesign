@@ -77,7 +77,7 @@ for model_class in models:
                         gradient_clip_val=1 #gradient clipping on norm = 1
                         )
 
-                    #tuner = Tuner(trainer) #autoselect largest batch_size, check pytorch lightning documentation
+                    #tuner = Tuner(trainer) #autoselect largest batch_size, check pytorch lightning documentation 
                     #tuner.scale_batch_size(model, datamodule=dm)
 
                     if model_class == VAE_transformer:

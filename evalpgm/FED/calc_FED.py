@@ -29,8 +29,8 @@ def calc_FED(mu_real, sigma_real, mu_gen, sigma_gen):
     print("Fréchet ESM Distance: ", FED)
     return FED
 
-#avg_emb_esm2_t33_650M_UR50D = torch.load("Thesis-GenModProtDesign/evalpgm/FED/avg_per_seq_emb_esm2_t33_650M_UR50D_subsample0_01.t") # Average FED over 50 cycles: 0.277, stdev: 0.007
-avg_emb_esm2_t33_650M_UR50D = torch.load("Thesis-GenModProtDesign/evalpgm/FED/avg_per_seq_emb_esm2_t33_650M_UR50D_subsample0_25.t") # Average FED over 50 cycles: 0.012, stdev = 0.000
+avg_emb_esm2_t33_650M_UR50D = torch.load("Thesis-GenModProtDesign/evalpgm/FED/avg_per_seq_emb_esm2_t33_650M_UR50D_subsample0_01.t") # Average FED over 50 cycles: 0.277, stdev: 0.007
+#avg_emb_esm2_t33_650M_UR50D = torch.load("Thesis-GenModProtDesign/evalpgm/FED/avg_per_seq_emb_esm2_t33_650M_UR50D_subsample0_25.t") # Average FED over 50 cycles: 0.012, stdev = 0.000
 
 with open('FED_650M_200k_50_cycles.txt', 'a') as f:
     f.write(f"FED calculation using esm2_t33_650M_UR50D embeddings on 25% of test data split as 40800 'generated' samples and 163204 'real' samples. \n")

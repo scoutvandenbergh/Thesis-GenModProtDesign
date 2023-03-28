@@ -192,7 +192,7 @@ class TransformerRoPE(nn.Module):
 
         pre_ln = self.ln2(attn + x)
         ffn = self.ffn(pre_ln)
-        output = ffn + x #ffn + x no? (instead of ffn + (residual=atn+x)) --> yes
+        output = ffn + x #ffn + x no? (instead of ffn + (residual=atn+x)) --> yes 
         return output
     
     
