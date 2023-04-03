@@ -10,15 +10,16 @@ setup(
     packages=find_packages(),
     version=__version__,
     license="MIT",
-    description="project template",
-    author="Gaetan De Waele",
-    author_email="gaetan.dewaele@ugent.be",
-    url="https://github.com/gdewael/project",
+    description="This GitHub project involves designing new protein sequences through the use of cutting-edge, Variational AutoEncoder-based models (VAE), generative models. Additionally, it introduces a novel evaluation metric called the Fréchet ESM Distance (FED) to evaluate these newly designed protein sequences.",
+    author="Scout Van den Bergh",
+    author_email="scoutvandenbergh@gmail.com",
+    url="https://github.com/scoutvandenbergh/Thesis-GenModProtDesign",
     install_requires=[
         "numpy",
         "torch",
         "pytorch-lightning",
         "h5torch",
-        "biopython"
+        "biopython",
+        "rotary_embedding_torch"
     ],
 )

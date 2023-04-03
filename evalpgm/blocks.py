@@ -131,6 +131,8 @@ class RoPEMultiHeadAttentionLayer(nn.Module):
         self.n_heads = n_heads
         self.head_dim = hidden_size // n_heads #hidden size in our model is [16, 32, 64, 128, 256], so head_dim is [2, 4, 8, 16, 32]
 
+        #NOTE: take this as base model, use fixed head_dim of 64 in expanded models perhaps
+
         # GPT-J-6B
         # The model consists of 28 layers with a model dimension of 4096, and a feedforward dimension of 16384. 
         # The model dimension is split into 16 heads, each with a dimension of 256. 
@@ -189,10 +191,11 @@ class TransformerRoPE(nn.Module):
     def forward(self, x):
         pre_ln = self.ln1(x)
         attn = self.RoPE_MHA(pre_ln)
+        residual = x + attn
 
-        pre_ln = self.ln2(attn + x)
+        pre_ln = self.ln2(residual)
         ffn = self.ffn(pre_ln)
-        output = ffn + x #ffn + x no? (instead of ffn + (residual=atn+x)) --> yes 
+        output = ffn + residual
         return output
     
     
@@ -200,7 +203,6 @@ class TransformerRoPE_Parallel(nn.Module): #ask Gaetan if correct
     def __init__(self, hidden_size, n_heads, dropout, activation = "SwiGLU"):
         super().__init__()
         self.ln1 = nn.LayerNorm(hidden_size)
-        #self.ln2 = nn.LayerNorm(hidden_size)
         self.RoPE_MHA = RoPEMultiHeadAttentionLayer(hidden_size, n_heads, dropout)
 
         if activation == "SwiGLU":
@@ -222,9 +224,10 @@ class TransformerRoPE_Parallel(nn.Module): #ask Gaetan if correct
         
     def forward(self, x): #as in ProGen2, GPT-J, PaLM, ... 
         pre_ln = self.ln1(x)
-        ffn = self.ffn(pre_ln)
 
+        ffn = self.ffn(pre_ln)
         attn = self.RoPE_MHA(pre_ln)
+        
         return x + attn + ffn
 
 

@@ -251,7 +251,7 @@ class VAE_transformer(ModelBackbone):
 
         self.log('train_loss', loss)
         if batch_idx % 1000 == 0:
-            with open('hparams transformer vs transformer_parallel.txt', 'a') as f:
+            with open('/home/scoutvdb/project/shared/scoutvdb/hparams transformer vs transformer_parallel.txt', 'a') as f:
                 indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
                 for i in indices:
                     f.write(f'[TRAIN] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
@@ -273,7 +273,7 @@ class VAE_transformer(ModelBackbone):
 
         self.log('test_loss', loss)
         if batch_idx % 1000 == 0:
-            with open('hparams transformer vs transformer_parallel.txt', 'a') as f:
+            with open('/home/scoutvdb/project/shared/scoutvdb/hparams transformer vs transformer_parallel.txt', 'a') as f:
                 indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
                 for i in indices:
                     f.write(f'[TEST] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
@@ -301,7 +301,7 @@ class VAE_transformer(ModelBackbone):
         self.log('validation_loss', loss)
 
         if batch_idx % 25 == 0:
-            with open('hparams transformer vs transformer_parallel.txt', 'a') as f:
+            with open('/home/scoutvdb/project/shared/scoutvdb/hparams transformer vs transformer_parallel.txt', 'a') as f:
                 indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
                 for i in indices:
                     f.write(f'[VALIDATION] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
@@ -424,7 +424,7 @@ class VAE_transformer_Parallel(ModelBackbone):
 
         self.log('train_loss', loss)
         if batch_idx % 1000 == 0:
-            with open('hparams transformer vs transformer_parallel.txt', 'a') as f:
+            with open('/home/scoutvdb/project/shared/scoutvdb/hparams transformer vs transformer_parallel.txt', 'a') as f:
                 indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
                 for i in indices:
                     f.write(f'[TRAIN] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
@@ -446,7 +446,7 @@ class VAE_transformer_Parallel(ModelBackbone):
 
         self.log('test_loss', loss)
         if batch_idx % 1000 == 0:
-            with open('hparams transformer vs transformer_parallel.txt', 'a') as f:
+            with open('/home/scoutvdb/project/shared/scoutvdb/hparams transformer vs transformer_parallel.txt', 'a') as f:
                 indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
                 for i in indices:
                     f.write(f'[TEST] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
@@ -474,7 +474,7 @@ class VAE_transformer_Parallel(ModelBackbone):
         self.log('validation_loss', loss)
 
         if batch_idx % 25 == 0:
-            with open('hparams transformer vs transformer_parallel.txt', 'a') as f:
+            with open('/home/scoutvdb/project/shared/scoutvdb/hparams transformer vs transformer_parallel.txt', 'a') as f:
                 indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
                 for i in indices:
                     f.write(f'[VALIDATION] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
