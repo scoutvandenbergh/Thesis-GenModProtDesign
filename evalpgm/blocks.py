@@ -112,7 +112,7 @@ class MultiHeadAttentionLayer(nn.Module):
         q = q.view(B, L, self.n_heads, self.head_dim).transpose(1, 2) # (B, nh, L, hs)
         v = v.view(B, L, self.n_heads, self.head_dim).transpose(1, 2) # (B, nh, L, hs)
 
-        attn = torch.matmul(q, k.transpose(-2,-1)) * k.size(-1)**0.5 #(B, nh, L, hs) x (B, nh, hs, L) -> (B, nh, L, L)
+        attn = torch.matmul(q, k.transpose(-2,-1)) / k.size(-1)**0.5 #(B, nh, L, hs) x (B, nh, hs, L) -> (B, nh, L, L)
         attention = F.softmax(attn, dim=-1)
         attention = torch.matmul(self.dropout(attention), v) #(B, nh, L, hs)
         
@@ -155,7 +155,7 @@ class RoPEMultiHeadAttentionLayer(nn.Module):
         q = self.rotary_emb.rotate_queries_or_keys(q)
         k = self.rotary_emb.rotate_queries_or_keys(k)
 
-        attn = torch.matmul(q, k.transpose(-2,-1)) * k.size(-1)**0.5 #(B, nh, L, hs) x (B, nh, hs, L) -> (B, nh, L, L)
+        attn = torch.matmul(q, k.transpose(-2,-1)) / k.size(-1)**0.5 #(B, nh, L, hs) x (B, nh, hs, L) -> (B, nh, L, L)
         attention = F.softmax(attn, dim=-1)
         attention = torch.matmul(self.dropout(attention), v) #(B, nh, L, hs)
         

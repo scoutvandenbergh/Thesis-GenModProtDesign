@@ -51,7 +51,7 @@ for factor in factors:
 
     times_ratios = []
     times_ratios_stdevs = []
-    for size_gen_set in gen_set_sizes:
+    for index_real_set_size, size_gen_set in enumerate(gen_set_sizes):
         list_FED_iter = []
         list_times_iter = []
 
@@ -59,7 +59,7 @@ for factor in factors:
             start = time.time()
             avg_emb_esm2_t33_650M_UR50D = avg_emb_esm2_t33_650M_UR50D[torch.randperm(avg_emb_esm2_t33_650M_UR50D.shape[0])] #Shuffle (dataloader was not shuffled)
             gen = avg_emb_esm2_t33_650M_UR50D[0:int(size_gen_set*factor)].numpy()
-            real = avg_emb_esm2_t33_650M_UR50D[int(size_gen_set*factor):int(size_gen_set*factor)+real_set_size].numpy()
+            real = avg_emb_esm2_t33_650M_UR50D[int(size_gen_set*factor):int(size_gen_set*factor)+real_set_size[index_real_set_size]].numpy()
 
             #assert avg_emb_esm2_t33_650M_UR50D.shape[0] == np.concatenate((gen, real), axis=0).shape[0], "Missing a sample?"
 

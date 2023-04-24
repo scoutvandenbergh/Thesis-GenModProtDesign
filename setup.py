@@ -20,6 +20,7 @@ setup(
         "pytorch-lightning",
         "h5torch",
         "biopython",
-        "rotary_embedding_torch"
+        "rotary_embedding_torch",
+        "fair-esm"
     ],
 )

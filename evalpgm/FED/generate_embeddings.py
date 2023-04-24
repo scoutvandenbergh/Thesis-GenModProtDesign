@@ -38,6 +38,9 @@ dataloader = torch.utils.data.DataLoader(test, batch_size=batch_size, pin_memory
 #model, alphabet = esm.pretrained.esm2_t33_650M_UR50D() ##33 layer transformer with 650M params trained on UniRef50D
 model, alphabet = load_model_and_alphabet_local(weights_path)
 
+#for HPC use 
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# model.to(device)
 model.to("cuda:0")
 model.eval()  # disables dropout for deterministic results
 print("esm2_t30_150M_UR50D loaded \n")
@@ -83,7 +86,7 @@ print("Average time per sequence: ", sum(times_embeddings)/len(times_embeddings)
 # Average time per batch of 16 proteins through esm2_t33_650M_UR50D:  1.3377883365673884
 # Average time per sequence:  0.08361177103546177
 # But runtime of tqdm was 17:35:33 for 12751 batches...
-
+#_____________________________________________________________________________________________________________
 
 # Output for 100% of data using esm2_t33_650M_UR50D model
 # torch.Size([817350, 1280])
@@ -91,14 +94,20 @@ print("Average time per sequence: ", sum(times_embeddings)/len(times_embeddings)
 # Average time per batch of 16 proteins through esm2_t33_650M_UR50D:  1.3466292208837438
 # Average time per sequence:  0.08416432630523399
 
-# Output for 100% of data using esm2_t6_8M_UR50D model
-# torch.Size([817350, 320])
-# 399.169970035553 51085
-# Average time per batch of 16 proteins through esm2_t6_8M_UR50D:  0.007813839092405853
-# Average time per sequence:  0.0004883649432753658
+# Output for 100% of data using esm2_t30_150M_UR50D model
+# torch.Size([817350, 640])
+# 23044.4554169178 51085
+# Average time per batch of 16 proteins through esm2_t30_150M_UR50D:  0.45110023327626114
+# Average time per sequence:  0.02819376457976632
 
 # Output for 100% of data using esm2_t12_35M_UR50D model
 # torch.Size([817350, 480])
 # 614.3640744686127 51085
 # Average time per batch of 16 proteins through esm2_t12_35M_UR50D:  0.012026310550427967
 # Average time per sequence:  0.000751644409401748
+
+# Output for 100% of data using esm2_t6_8M_UR50D model
+# torch.Size([817350, 320])
+# 399.169970035553 51085
+# Average time per batch of 16 proteins through esm2_t6_8M_UR50D:  0.007813839092405853
+# Average time per sequence:  0.0004883649432753658
