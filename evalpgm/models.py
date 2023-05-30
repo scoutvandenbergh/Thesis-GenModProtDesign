@@ -163,7 +163,9 @@ class VAE_transformer(ModelBackbone):
         n_warmup_steps = 1000,
         beta = 0.001,
         gamma = 1e-05,
-        activation = "SwiGLU"):
+        activation = "SwiGLU",
+        use_decoder_length=True):
+
 
         super().__init__(learning_rate = learning_rate, n_warmup_steps = n_warmup_steps)
         self.save_hyperparameters()
@@ -212,18 +214,22 @@ class VAE_transformer(ModelBackbone):
             *[ResidualBlock(hidden_sizes[0], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)],
             nn.Conv1d(hidden_sizes[0], vocab_size, kernel_size = 1), # to output B x 21 x 1024
         )
-
-        self.decoderLength = nn.Sequential(
-            nn.Linear(bottleneck_size, 64),
-            newGELU(),
-            nn.Linear(64,32),
-            newGELU(),
-            nn.Linear(32,16),
-            newGELU(),
-            nn.Linear(16,4),
-            newGELU(),
-            nn.Linear(4,1)
+        if use_decoder_length:
+            self.decoderLength = nn.Sequential(
+                nn.Linear(bottleneck_size, 64),
+                newGELU(),
+                nn.Linear(64,32),
+                newGELU(),
+                nn.Linear(32,16),
+                newGELU(),
+                nn.Linear(16,4),
+                newGELU(),
+                nn.Linear(4,1)
         )
+        else:
+            self.decoderLength = None
+        
+        self.use_decoder_length = use_decoder_length
 
         self.beta = beta
         self.gamma = gamma
@@ -243,78 +249,153 @@ class VAE_transformer(ModelBackbone):
     def forward(self,x):
         mean, logvar = self.encode(x)
         z = self.reparameterize(mean, logvar)
-        return self.decode(z), mean, logvar , self.decoderLength(z) #ask gaetan, does this make sense to have z as input to predict the length?
+        if self.decoderLength != None:
+            length = self.decoderLength(z)
+        else:
+            length = None
+        return self.decode(z), mean, logvar , length 
         
     def training_step(self, batch, batch_idx):
         X, actual_lengths = batch
-        recon_x, mean, log_var, length_pred = self.forward(X)
-        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+        if self.use_decoder_length:
+            recon_x, mean, log_var, length_pred = self.forward(X)
+            pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
 
-        lengthmask = self.get_mask(actual_lengths)
+            lengthmask = self.get_mask(actual_lengths)
 
-        reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
-        length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
-        KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+            reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
+            length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
+            KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
-        loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss
+            loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss
 
-        self.log('train_loss', loss)
-        if batch_idx % 1000 == 0:
-            with open('/home/scoutvdb/project/shared/scoutvdb/hparams transformer vs transformer_parallel.txt', 'a') as f:
-                indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
-                for i in indices:
-                    f.write(f'[TRAIN] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
-                    f.flush()
+            self.log('train_loss', loss)
+            self.log('train_KL_los', KL_divergence)
+            self.log('train_recon_loss', reconstruction_loss)
+            self.log('train_KL_beta', KL_divergence * self.beta)
+
+            if batch_idx % 1000 == 0:
+                with open('/home/scoutvdb/project/shared/scoutvdb/hparams transformer vs transformer_parallel.txt', 'a') as f:
+                    indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
+                    for i in indices:
+                        f.write(f'[TRAIN] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
+                        f.flush()
+        else:
+            recon_x, mean, log_var, _ = self.forward(X)
+            lengthmask = self.get_mask(actual_lengths)
+
+            reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
+            KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+
+            loss = reconstruction_loss + self.beta * KL_divergence
+
+            self.log('train_loss', loss)
+            self.log('train_KL_los', KL_divergence)
+            self.log('train_recon_loss', reconstruction_loss)
+            self.log('train_KL_beta', KL_divergence * self.beta)
+
+            if batch_idx % 1000 == 0:
+                with open('/home/scoutvdb/project/shared/scoutvdb/NO_decoderLength_hparams transformer vs transformer_parallel.txt', 'a') as f:
+                    indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
+                    for i in indices:
+                        f.write(f'[TRAIN] Epoch {self.current_epoch}, Step {batch_idx}:  Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(torch.tensor(KL_divergence).item(), 2)} KL*self.beta: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
+                        f.flush()
+
         return loss
 
     def test_step(self, batch, batch_idx):
         X, actual_lengths = batch
-        recon_x, mean, log_var, length_pred = self.forward(X)
-        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+        if self.use_decoder_length:
+            recon_x, mean, log_var, length_pred = self.forward(X)
+            pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
 
-        lengthmask = self.get_mask(actual_lengths)
+            lengthmask = self.get_mask(actual_lengths)
 
-        reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
-        length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
-        KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+            reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
+            length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
+            KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
-        loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss
+            loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss
 
-        self.log('test_loss', loss)
-        if batch_idx % 1000 == 0:
-            with open('/home/scoutvdb/project/shared/scoutvdb/hparams transformer vs transformer_parallel.txt', 'a') as f:
-                indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
-                for i in indices:
-                    f.write(f'[TEST] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
-                    f.flush()
+            self.log('test_loss', loss)
+            self.log('test_loss', loss)
+            self.log('test_KL_los', KL_divergence)
+            self.log('test_recon_loss', reconstruction_loss)
+            self.log('test_KL_beta', KL_divergence * self.beta)
+            if batch_idx % 1000 == 0:
+                with open('/home/scoutvdb/project/shared/scoutvdb/hparams transformer vs transformer_parallel.txt', 'a') as f:
+                    indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
+                    for i in indices:
+                        f.write(f'[TEST] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
+                        f.flush()
+        else:
+            recon_x, mean, log_var, _ = self.forward(X)
+            lengthmask = self.get_mask(actual_lengths)
+
+            reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
+            KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+
+            loss = reconstruction_loss + self.beta * KL_divergence
+
+            self.log('test_loss', loss)
+            self.log('test_KL_los', KL_divergence)
+            self.log('test_recon_loss', reconstruction_loss)
+            self.log('test_KL_beta', KL_divergence * self.beta)
+
+            if batch_idx % 1000 == 0:
+                with open('/home/scoutvdb/project/shared/scoutvdb/NO_decoderLength_hparams transformer vs transformer_parallel.txt', 'a') as f:
+                    indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
+                    for i in indices:
+                        f.write(f'[TEST] Epoch {self.current_epoch}, Step {batch_idx}:  Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(torch.tensor(KL_divergence).item(), 2)} KL*self.beta: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
+                        f.flush()
+
         return loss
 
     def validation_step(self, batch, batch_idx): 
         X, actual_lengths = batch
-        recon_x, mean, log_var, length_pred = self.forward(X)
-        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+        if self.use_decoder_length:
+            recon_x, mean, log_var, length_pred = self.forward(X)
+            pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
 
-        lengthmask = self.get_mask(actual_lengths)
+            lengthmask = self.get_mask(actual_lengths)
 
-        reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
-        length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
-        KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+            reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
+            length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
+            KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
-        loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss
+            loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss
 
-        self.log('validation_reconstruction_loss', reconstruction_loss)
-        self.log('validation_KL_divergence', KL_divergence)
-        self.log('validation self.beta*KL', self.beta*KL_divergence)
-        self.log('validation_length_loss', length_loss)
-        self.log('validation self.gamma*length_loss', self.gamma * length_loss)
-        self.log('validation_loss', loss)
+            self.log('validation_loss', loss)
+            self.log('validation_KL_loss', KL_divergence)
+            self.log('validation_recon_loss', reconstruction_loss)
+            self.log('validation_KL_beta', KL_divergence * self.beta)
+            if batch_idx % 25 == 0:
+                with open('/home/scoutvdb/project/shared/scoutvdb/hparams transformer vs transformer_parallel.txt', 'a') as f:
+                    indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
+                    for i in indices:
+                        f.write(f'[VALIDATION] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
+                        f.flush()
+        else:
+            recon_x, mean, log_var, _ = self.forward(X)
+            lengthmask = self.get_mask(actual_lengths)
 
-        if batch_idx % 25 == 0:
-            with open('/home/scoutvdb/project/shared/scoutvdb/hparams transformer vs transformer_parallel.txt', 'a') as f:
-                indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
-                for i in indices:
-                    f.write(f'[VALIDATION] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
-                    f.flush()
+            reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
+            KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+
+            loss = reconstruction_loss + self.beta * KL_divergence
+
+            self.log('validation_loss', loss)
+            self.log('validation_KL_loss', KL_divergence)
+            self.log('validation_recon_loss', reconstruction_loss)
+            self.log('validation_KL_beta', KL_divergence * self.beta)
+
+            if batch_idx % 25 == 0:
+                with open('/home/scoutvdb/project/shared/scoutvdb/NO_decoderLength_hparams transformer vs transformer_parallel.txt', 'a') as f:
+                    indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
+                    for i in indices:
+                        f.write(f'[VALIDATION] Epoch {self.current_epoch}, Step {batch_idx}:  Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(torch.tensor(KL_divergence).item(), 2)} KL*self.beta: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
+                        f.flush()
+
         return loss
 
     def get_mask(self, lengths):
@@ -336,10 +417,12 @@ class VAE_transformer_test_strided_conv(ModelBackbone):
         n_warmup_steps = 1000,
         beta = 0.001,
         gamma = 1e-05,
-        activation = "SwiGLU"):
+        activation = "SwiGLU",
+        use_decoder_length=True):
 
         super().__init__(learning_rate = learning_rate, n_warmup_steps = n_warmup_steps)
         self.save_hyperparameters()
+        self.learning_rate = learning_rate
         
 
         self.encoder = nn.Sequential(
@@ -398,17 +481,23 @@ class VAE_transformer_test_strided_conv(ModelBackbone):
             nn.Conv1d(hidden_sizes[0], vocab_size, kernel_size = 1), # to output B x 21 x 1024
         )
 
-        self.decoderLength = nn.Sequential(
-            nn.Linear(bottleneck_size, 64),
-            newGELU(),
-            nn.Linear(64,32),
-            newGELU(),
-            nn.Linear(32,16),
-            newGELU(),
-            nn.Linear(16,4),
-            newGELU(),
-            nn.Linear(4,1)
+        if use_decoder_length:
+            self.decoderLength = nn.Sequential(
+                nn.Linear(bottleneck_size, 64),
+                newGELU(),
+                nn.Linear(64,32),
+                newGELU(),
+                nn.Linear(32,16),
+                newGELU(),
+                nn.Linear(16,4),
+                newGELU(),
+                nn.Linear(4,1),
+                nn.Sigmoid()
         )
+        else:
+            self.decoderLength = None
+        
+        self.use_decoder_length = use_decoder_length
 
         self.beta = beta
         self.gamma = gamma
@@ -418,7 +507,12 @@ class VAE_transformer_test_strided_conv(ModelBackbone):
         return self.lin_mu(x), self.lin_var(x)
     
     def decode(self, x):
-        return self.decoder(x)
+        output = self.decoder(x)
+        if self.use_decoder_length:
+            length_pred = self.decoderLength(x)
+        else:
+            length_pred = None
+        return output, length_pred
 
     def reparameterize(self, mean, logvar):
         std = torch.exp(0.5*logvar)
@@ -428,113 +522,264 @@ class VAE_transformer_test_strided_conv(ModelBackbone):
     def forward(self,x):
         mean, logvar = self.encode(x)
         z = self.reparameterize(mean, logvar)
-        return self.decode(z), mean, logvar , self.decoderLength(z) #ask gaetan, does this make sense to have z as input to predict the length?
+        recon_x, length_pred = self.decode(z)
+        return recon_x, length_pred, mean, logvar
         
     def training_step(self, batch, batch_idx):
         X, actual_lengths = batch
-        recon_x, mean, log_var, length_pred = self.forward(X)
-        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+        if self.use_decoder_length:
+            recon_x, length_pred, mean, log_var = self.forward(X) #just comparing to actual_lengths is in /shared/scout/logs/26_april_new_find_gamma
+            #pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+            #pred_lengths = length_pred * 1024 #torch.Size([B, 1])
 
-        lengthmask = self.get_mask(actual_lengths)
+            
+            #lengthmask = self.get_mask(actual_lengths)
 
-        reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
-        length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
-        KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+            counter = torch.arange(1024).expand(len(actual_lengths), -1).to(actual_lengths.device)
+            mask = counter <= torch.round(actual_lengths.unsqueeze(1)*1024) #moet dit * 1024???
+            # zou als extra test dit nog terug kunnen veranderen naar reconstruction loss enkel laten baseren op predicted length
+            # NOTE: of if statement hardcoden: als argmax positie actual_length != 1, doe length loss of reconstruction loss * 10 @Gaetan
 
-        loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss
+            reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[mask], X[mask])
+            length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
+            KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
-        self.log('train_loss', loss)
-        if batch_idx % 1000 == 0:
-            with open('/home/scoutvdb/project/shared/scoutvdb/test_stride2_hparams transformer vs transformer_parallel.txt', 'a') as f:
-                indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
-                for i in indices:
-                    f.write(f'[TRAIN] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
-                    f.flush()
+            loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss
+
+            self.log('train_loss', loss)
+            self.log('train_KL_loss', KL_divergence)
+            self.log('train_recon_loss', reconstruction_loss)
+            self.log('train_KL_beta', KL_divergence * self.beta)
+            self.log('train_length_loss', length_loss)
+            self.log('train_length_loss_gamma', length_loss*self.gamma)
+
+            if batch_idx % 1000 == 0:
+                with open('/home/scoutvdb/project/shared/scoutvdb/train_outputs_29_MAY_reconstruction_fixed_FED_outputs.txt', 'a') as f:
+                    indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
+                    for i in indices:
+                        f.write(f'[TRAIN] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(torch.tensor(length_pred[i]).item(), 2)}, Target: {round(torch.tensor(actual_lengths[i]).item(), 2)}, (MSE, self.gamma*MSE): ({F.mse_loss(length_pred[i], actual_lengths[i]).item()}, {self.gamma*F.mse_loss(length_pred[i], actual_lengths[i]).item()}), Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
+                        f.flush()
+        else:
+            recon_x, _, mean, log_var = self.forward(X)
+            #lengthmask = self.get_mask_full_length(actual_lengths)
+
+            #reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
+            reconstruction_loss = F.cross_entropy(recon_x, X)
+            KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+
+            loss = reconstruction_loss + self.beta * KL_divergence
+
+            self.log('train_loss', loss)
+            self.log('train_KL_loss', KL_divergence)
+            self.log('train_recon_loss', reconstruction_loss)
+            self.log('train_KL_beta', KL_divergence * self.beta)
+
+            if batch_idx % 1000 == 0:
+                with open('/home/scoutvdb/project/shared/scoutvdb/26april_NO_decoderLength_hp_decoderLength_stridedConv_model.txt', 'a') as f:
+                    indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
+                    for i in indices:
+                        f.write(f'[TRAIN] Epoch {self.current_epoch}, Step {batch_idx}:  Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(torch.tensor(KL_divergence).item(), 2)} KL*self.beta: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
+                        f.flush()
+
         return loss
 
     def test_step(self, batch, batch_idx):
         X, actual_lengths = batch
-        recon_x, mean, log_var, length_pred = self.forward(X)
-        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+        if self.use_decoder_length:
+            recon_x, length_pred, mean, log_var = self.forward(X)
+            #pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+            #pred_lengths = length_pred * 1024 #torch.Size([B, 1])
 
-        lengthmask = self.get_mask(actual_lengths)
+            #lengthmask = self.get_mask(actual_lengths)
 
-        reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
-        length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
-        KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+            counter = torch.arange(1024).expand(len(actual_lengths), -1).to(actual_lengths.device)
+            mask = counter <= torch.round(actual_lengths.unsqueeze(1)*1024) #moet dit * 1024???
 
-        loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss
+            reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[mask], X[mask])
+            length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths) # NOTE: vrij zeker dat dit moet zijn F.mse_loss(pred_lengths.squeeze(), actual_lengths)
+            KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
-        self.log('test_loss', loss)
-        if batch_idx % 1000 == 0:
-            with open('/home/scoutvdb/project/shared/scoutvdb/test_stride2_hparams transformer vs transformer_parallel.txt', 'a') as f:
-                indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
-                for i in indices:
-                    f.write(f'[TEST] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
-                    f.flush()
+            loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss
+
+            self.log('test_loss', loss)
+            self.log('test_KL_loss', KL_divergence)
+            self.log('test_recon_loss', reconstruction_loss)
+            self.log('test_KL_beta', KL_divergence * self.beta)
+            self.log('test_length_loss', length_loss)
+            self.log('test_length_loss_gamma', length_loss*self.gamma)
+
+            if batch_idx % 1000 == 0:
+                with open('/home/scoutvdb/project/shared/scoutvdb/train_outputs_29_MAY_reconstruction_fixed_FED_outputs.txt', 'a') as f:
+                    indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
+                    for i in indices:
+                        f.write(f'[TEST] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(torch.tensor(length_pred[i]).item(), 2)}, Target: {round(torch.tensor(actual_lengths[i]).item(), 2)}, (MSE, self.gamma*MSE): ({F.mse_loss(length_pred[i], actual_lengths[i]).item()}, {self.gamma*F.mse_loss(length_pred[i], actual_lengths[i]).item()}), Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
+                        f.flush()
+        else:
+            recon_x, _, mean, log_var = self.forward(X)
+            #lengthmask = self.get_mask_full_length(actual_lengths)
+
+            #reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
+            reconstruction_loss = F.cross_entropy(recon_x, X)
+            KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+
+            loss = reconstruction_loss + self.beta * KL_divergence
+
+            self.log('test_loss', loss)
+            self.log('test_KL_loss', KL_divergence)
+            self.log('test_recon_loss', reconstruction_loss)
+            self.log('test_KL_beta', KL_divergence * self.beta)
+
+            if batch_idx % 1000 == 0:
+                with open('/home/scoutvdb/project/shared/scoutvdb/26april_NO_decoderLength_hp_decoderLength_stridedConv_model.txt', 'a') as f:
+                    indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
+                    for i in indices:
+                        f.write(f'[TEST] Epoch {self.current_epoch}, Step {batch_idx}:  Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(torch.tensor(KL_divergence).item(), 2)} KL*self.beta: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
+                        f.flush()
+
         return loss
 
     def validation_step(self, batch, batch_idx): 
+        # X, actual_lengths = batch
+        # recon_x, mean, log_var, length_pred = self.forward(X)
+        # pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+
+        # lengthmask = self.get_mask(actual_lengths)
+
+        # reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
+        # length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
+        # KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+
+        # loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss
+
+        # if batch_idx % 10 == 0:
+        #     print(f"Evaluating performance of model after {batch_idx} steps. ")
+        #     generated_seqs = generate_sequences(model=self)
+        #     lengths = []
+
+        #     for seq in generated_seqs:
+        #         if seq[-1] == 1: #find sequences that are padded
+        #             index = np.where(seq == 1)[0] #see where first padding token is
+        #             lengths.append(index[0]) #this corresponds to the true length of the generated sequence
+        #         else:
+        #             lengths.append(len(seq)) #if the last token is not a padding token, the entire length is the real lengths
+
+        #     embeddings_generated_seqs = process_embeddings_ESM2_35M(model = ESM2_35M,
+        #                                                             data=generated_seqs, 
+        #                                                             lengths=lengths)
+        #     avg_FED, stdev_FED = calc_avg_FED(path_real_embeddings="/home/scoutvdb/project/esm_real_embeddings/1esm2_t12_35M_0_817350_emb.t", 
+        #                                       generated_embeddings=embeddings_generated_seqs)
+        #     avg_FED_list.append(avg_FED)
+        #     stdev_FED_list.append(stdev_FED)
+
+        #     self.log('avg_FED_validation', avg_FED)
+        #     self.log('stdev_FED_validation', stdev_FED)
+        #     del generated_seqs, embeddings_generated_seqs
+        #     # Release GPU memory occupied by PyTorch tensors
+        #     torch.cuda.empty_cache()
+
+        # self.log('validation_reconstruction_loss', reconstruction_loss)
+        # self.log('validation_KL_divergence', KL_divergence)
+        # self.log('validation self.beta*KL', self.beta*KL_divergence)
+        # self.log('validation_length_loss', length_loss)
+        # self.log('validation self.gamma*length_loss', self.gamma * length_loss)
+        # self.log('validation_loss', loss)
+
+        # if batch_idx % 25 == 0:
+        #     with open('/home/scoutvdb/project/shared/scoutvdb/test_stride2_hparams transformer vs transformer_parallel.txt', 'a') as f:
+        #         indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
+        #         for i in indices:
+        #             f.write(f'[VALIDATION] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
+        #             f.flush()
+
         X, actual_lengths = batch
-        recon_x, mean, log_var, length_pred = self.forward(X)
-        pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+        if self.use_decoder_length:
+            recon_x, length_pred, mean, log_var = self.forward(X)
+            #pred_lengths = torch.clamp(length_pred, min=0, max=1) * actual_lengths.unsqueeze(1) #torch.Size([B, 1])
+            #pred_lengths = length_pred * 1024 #torch.Size([B, 1]) # NOTE: toen het nog wel werkte, werd gewoon length_pred (uitkomst van sigmoid) in mse gestoken en mse(length_pred, actual_lengths)
+           # print("actual lengths", actual_lengths, len(actual_lengths))
 
-        lengthmask = self.get_mask(actual_lengths)
+            #lengthmask = self.get_mask(actual_lengths)
 
-        reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
-        length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
-        KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+            counter = torch.arange(1024).expand(len(actual_lengths), -1).to(actual_lengths.device)
+            mask = counter <= torch.round(actual_lengths.unsqueeze(1)*1024) #moet dit * 1024???
 
-        loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss
+            reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[mask], X[mask])
+            length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
+            KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
-        if batch_idx % 10 == 0:
-            print(f"Evaluating performance of model after {batch_idx} steps. ")
-            generated_seqs = generate_sequences(model=self)
-            lengths = []
+            loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss
 
-            for seq in generated_seqs:
-                if seq[-1] == 1: #find sequences that are padded
-                    index = np.where(seq == 1)[0] #see where first padding token is
-                    lengths.append(index[0]) #this corresponds to the true length of the generated sequence
-                else:
-                    lengths.append(len(seq)) #if the last token is not a padding token, the entire length is the real lengths
+            self.log('validation_loss', loss)
+            self.log('validation_KL_loss', KL_divergence)
+            self.log('validation_recon_loss', reconstruction_loss)
+            self.log('validation_KL_beta', KL_divergence * self.beta)
+            self.log('validation_length_loss', length_loss)
+            self.log('validation_length_loss_gamma', length_loss*self.gamma)
 
-            embeddings_generated_seqs = process_embeddings_ESM2_35M(model = ESM2_35M,
-                                                                    data=generated_seqs, 
-                                                                    lengths=lengths)
-            avg_FED, stdev_FED = calc_avg_FED(path_real_embeddings="/home/scoutvdb/project/esm_real_embeddings/1esm2_t12_35M_0_817350_emb.t", 
-                                              generated_embeddings=embeddings_generated_seqs)
-            avg_FED_list.append(avg_FED)
-            stdev_FED_list.append(stdev_FED)
+            if batch_idx % 100000 == 0:
+                print(f"Evaluating performance of model after {batch_idx} steps. ")
+                generated_seqs, roundedLengths, avg_length = generate_sequences(model=self, amount = 2500, temperature=0.8)
 
-            self.log('avg_FED_validation', avg_FED)
-            self.log('stdev_FED_validation', stdev_FED)
-            del generated_seqs, embeddings_generated_seqs
+                embeddings_generated_seqs = process_embeddings_ESM2_35M(model = ESM2_35M,
+                                                                            data=generated_seqs, 
+                                                                            lengths=roundedLengths)
+                # avg_FED, stdev_FED = calc_avg_FED(path_real_embeddings="/home/scoutvdb/project/esm_real_embeddings/1esm2_t12_35M_0_817350_emb.t", 
+                #                                     generated_embeddings=embeddings_generated_seqs)
+                avg_FED, stdev_FED = calc_avg_FED(path_real_embeddings="/home/scoutvdb/project/shared/scoutvdb/data/correct_VALIDATION_esm2_t12_35M_emb.t", 
+                                                  generated_embeddings=embeddings_generated_seqs, real_set_size=10000)
+                avg_FED_list.append(avg_FED)
+                stdev_FED_list.append(stdev_FED)
+
+                with open('/home/scoutvdb/project/shared/scoutvdb/29_MAY_gpu_0_reconstruction_fixed_FED_outputs.txt', 'a') as f:
+                    f.write(f"Gamma \t {self.gamma} \t Beta \t {self.beta} \t lr \t {self.learning_rate} \t Avg FED \t {avg_FED} \t stdev FED \t {stdev_FED} \t avg length \t {avg_length} \n")
+                    f.flush()
+
+                self.log('avg_FED_validation', avg_FED)
+                self.log('stdev_FED_validation', stdev_FED)
+                del generated_seqs, embeddings_generated_seqs
+                with open('/home/scoutvdb/project/shared/scoutvdb/TEST_before_HPC_18_may_pls_no_NaNs.txt', 'a') as f:
+                    indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
+                    for i in indices:
+                        f.write(f'[VALIDATION] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(torch.tensor(length_pred[i]).item(), 2)}, Target: {round(torch.tensor(actual_lengths[i]).item(), 2)}, (MSE, self.gamma*MSE): ({F.mse_loss(length_pred[i], actual_lengths[i]).item()}, {self.gamma*F.mse_loss(length_pred[i], actual_lengths[i]).item()}), Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
+                        f.flush()
             # Release GPU memory occupied by PyTorch tensors
             torch.cuda.empty_cache()
+        else:
+            recon_x, _, mean, log_var = self.forward(X)
+            #lengthmask = self.get_mask_full_length(actual_lengths)
 
+            #reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[lengthmask], X[lengthmask])
+            print("X", X.shape)
+            print("recon_x", recon_x.shape)
+            print("recon_x permute(0,2,1)", recon_x.permute(0,2,1).shape)
+            reconstruction_loss = F.cross_entropy(recon_x, X)
+            KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
 
+            loss = reconstruction_loss + self.beta * KL_divergence
 
+            self.log('validation_loss', loss)
+            self.log('validation_KL_loss', KL_divergence)
+            self.log('validation_recon_loss', reconstruction_loss)
+            self.log('validation_KL_beta', KL_divergence * self.beta)
 
-        self.log('validation_reconstruction_loss', reconstruction_loss)
-        self.log('validation_KL_divergence', KL_divergence)
-        self.log('validation self.beta*KL', self.beta*KL_divergence)
-        self.log('validation_length_loss', length_loss)
-        self.log('validation self.gamma*length_loss', self.gamma * length_loss)
-        self.log('validation_loss', loss)
+            if batch_idx % 1000 == 0:
+                with open('/home/scoutvdb/project/shared/scoutvdb/26_april_NO_decoderLength_hp_decoderLength_stridedConv_model.txt', 'a') as f:
+                    indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
+                    for i in indices:
+                        f.write(f'[VALIDATION] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(torch.tensor(length_pred[i]).item()*1024, 2)}, Target: {round(torch.tensor(actual_lengths[i]).item()*1024, 2)}, (MSE, self.gamma*MSE): {F.mse_loss(length_pred[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
+                        f.flush()
 
-        if batch_idx % 25 == 0:
-            with open('/home/scoutvdb/project/shared/scoutvdb/test_stride2_hparams transformer vs transformer_parallel.txt', 'a') as f:
-                indices = random.sample(range(X.shape[0]), min(X.shape[0], 1))
-                for i in indices:
-                    f.write(f'[VALIDATION] Epoch {self.current_epoch}, Step {batch_idx}: Predicted: {round(pred_lengths[i].item(), 2)}, Target: {actual_lengths[i]}, (MSE, self.gamma*MSE): {F.mse_loss(pred_lengths[i], actual_lengths[i]).item(), self.gamma*F.mse_loss(pred_lengths[i], actual_lengths[i]).item()}, Recon: {round(torch.tensor(reconstruction_loss).item(), 2)}, KL: {round(self.beta * torch.tensor(KL_divergence).item(), 2)}, loss: {round(loss.item(), 2)}\n')
-                    f.flush()
         return loss
 
     def get_mask(self, lengths):
         lengths_clamped = torch.clamp(lengths.detach().squeeze(), min=64, max=1024) # B
         counter = torch.arange(1024).expand(len(lengths_clamped), -1).to(lengths_clamped.device)
-        mask = counter < lengths_clamped.unsqueeze(1) # B x 1024
+        mask = counter <= lengths_clamped.unsqueeze(1) # B x 1024
+        return mask
+
+    def get_mask_full_length(self, lengths):
+        counter = torch.arange(1024).expand(len(lengths), -1).to(lengths.device)
+        mask = counter < lengths.unsqueeze(1) # B x 1024
         return mask
     
 class VAE_transformer_Parallel_test_strided_conv(ModelBackbone):

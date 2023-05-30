@@ -19,9 +19,10 @@ idx_to_tok_esm2_150M = {v : k for k,v in tok_to_idx_esm2_150M.items()}
 
 def pad_batch(f, sample, pad_to = 1024):
     sequence = sample["central"]
-    length = sample["0/protein_length"]
+    length = sample["0/protein_length"] 
+    length_normalized = length / 1024 #added, suggestion Gaetan
     sequence = np.concatenate([sequence, np.ones((pad_to - length), dtype=sequence.dtype)])
-    return sequence, length.astype(np.float32)
+    return sequence, length_normalized.astype(np.float32) #modified, originally length.astype ...
     
 
 class Uniref50DataModule(pl.LightningDataModule):

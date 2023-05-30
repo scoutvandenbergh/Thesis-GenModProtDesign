@@ -246,7 +246,7 @@ class SwiGLU(nn.Module):
         self.linear = nn.Linear(input_dim, input_dim * 8)
         if beta_swi == None:
             self.beta = nn.Parameter(torch.ones(input_dim * 4))
-        else: #prob better to change to another if or elif but not important in current implementation
+        else: 
             self.beta = beta_swi
 
     def forward(self, x):

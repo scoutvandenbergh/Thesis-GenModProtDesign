@@ -43,9 +43,9 @@ def process_embeddings_ESM2_35M(model, data, lengths):
     sequence_representations = []
     counter = 0
 
-    for i, batch in enumerate(tqdm(dataloader)):
+    for i, batch in enumerate(tqdm(dataloader, mininterval=60)): #show tqdm progress every 60 seconds.
         if i % 250 == 0:
-            print(f"Step{i}")
+            print(f"Step{i}", flush=True) #test if this works, without flush it only shows the print staments after all the, now deleted, tqdm output was shown so irrelevant!
 
         with torch.no_grad():
             results = model(batch.to(device), repr_layers=[12], return_contacts=False)
