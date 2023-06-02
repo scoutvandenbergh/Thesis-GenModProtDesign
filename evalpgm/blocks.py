@@ -5,10 +5,6 @@ from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 import math
 from rotary_embedding_torch import RotaryEmbedding
-#from pytorch_lightning.tuner import Tuner #can use to automatically find best lr (check documentation)
-
-#tuner.scale_batch_size(model, mode="power") find max batch size by doubling batch size until OOM
-
 
 class Permute(nn.Module): 
     def __init__(self, *args):
@@ -106,7 +102,7 @@ class MultiHeadAttentionLayer(nn.Module):
         
     def forward(self, x):
         B, L, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
-        k, q, v = self.kqv(x).chunk(3, dim=-1)
+        k, q, v = self.kqv(x).chunk(3, dim=-1) #NOTE: has no PE yet
         
         k = k.view(B, L, self.n_heads, self.head_dim).transpose(1, 2) # (B, nh, L, hs)
         q = q.view(B, L, self.n_heads, self.head_dim).transpose(1, 2) # (B, nh, L, hs)
