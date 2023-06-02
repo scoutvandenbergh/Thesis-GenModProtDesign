@@ -38,7 +38,7 @@ class ResidualBlock(nn.Module):
 
         self.net = nn.Sequential(
             nn.Conv1d(hidden_dim, hidden_dim, kernel_size, padding = "same"), #channels in, channels out, kernel size
-            #nn.GELU(), #instead use new gelu, this ones uses 'input * 0.5 * (1.0 + torch.erf(input / math.sqrt(2.0)))'
+            #nn.GELU(), #instead use new gelu, this ones uses 'input * 0.5 * (1.0 + torch.erf(input / math.sqrt(2.0)))' 
             newGELU(),
             nn.Dropout(dropout),
             Permute(0,2,1),

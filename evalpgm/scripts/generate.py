@@ -49,3 +49,4 @@ def generate_sequences(model, amount = 25000, temperature = 0.8):
     sampledProteins_tensor = torch.tensor(sampledProteins)
     print(sampledProteins_tensor.shape)
     return sampledProteins_tensor, roundedLengths, np.mean(roundedLengths) 
+ 

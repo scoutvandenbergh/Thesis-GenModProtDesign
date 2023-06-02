@@ -39,7 +39,7 @@ class convolutional_VAE_RoPE(ModelBackbone):
         
 
         self.encoder = nn.Sequential(
-            nn.Embedding(vocab_size, hidden_sizes[0]), # gives B x 1024 x 16 BxLxC
+            nn.Embedding(vocab_size, hidden_sizes[0]), # gives B x 1024 x 16 BxLxC 
             Permute(0,2,1), # B x 16 x 1024 BxCxL
             *[ResidualBlock(hidden_sizes[0], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)], #B x 16 x 1024
             nn.Conv1d(hidden_sizes[0], hidden_sizes[1], kernel_size = 4, stride = 4), # B x 32 x 256
