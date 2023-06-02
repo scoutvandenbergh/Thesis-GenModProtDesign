@@ -25,7 +25,7 @@ class View(nn.Module):
 def swish(x, beta): #also wrap in class Swish(nn.Module)?
     return x * 1/(1+torch.exp(-x * beta))
 
-def gelu(x): #implementation currently used in OpenAI GPTs and Google BERT, wrap in class newGELU(nn.Module) wrapper to use in ResidualBlock etc?
+def gelu(x): #implementation currently used in OpenAI GPTs and Google BERT, wrap in class newGELU(nn.Module) wrapper to use in ResidualBlock etc? 
     return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3.0))))
 
 class newGELU(nn.Module):

@@ -11,7 +11,7 @@ import datetime
 data_path = str(sys.argv[1])
 logs_path = str(sys.argv[2])
 eval_FED_flag = str(sys.argv[3]).lower() == 'true'
-#ckpt_path = str(sys.argv[3])
+#ckpt_path = str(sys.argv[3]) 
 print("Use eval_FED:", eval_FED_flag)
 
 lr = 5e-05

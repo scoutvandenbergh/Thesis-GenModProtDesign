@@ -16,6 +16,7 @@ now = datetime.datetime.now()
 date_str = now.strftime("%d_%m_%Y")
 print(date_str)
 
+
 class convolutional_VAE_RoPE(ModelBackbone):
     def __init__(
         self,

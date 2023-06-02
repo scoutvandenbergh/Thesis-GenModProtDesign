@@ -84,3 +84,4 @@ class Uniref50DataModule(pl.LightningDataModule):
             shuffle=False,
             pin_memory=True,
         )
+    
