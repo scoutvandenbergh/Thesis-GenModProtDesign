@@ -21,10 +21,11 @@ class convolutional_VAE_RoPE(ModelBackbone):
     def __init__(
         self,
         vocab_size = 21, 
-        hidden_sizes = [16, 32, 64, 128, 256, 512], 
+        hidden_sizes = [16, 32, 64, 128], 
         bottleneck_size = 128, 
         learning_rate = 0.0001, 
         blocks_per_stage = 4,
+        n_transformer_layers = 5,
         n_heads = 8,
         n_warmup_steps = 1000,
         beta = 0.001,
@@ -37,62 +38,44 @@ class convolutional_VAE_RoPE(ModelBackbone):
         self.save_hyperparameters()
         self.learning_rate = learning_rate
         
-
-        self.encoder = nn.Sequential(
+        encoder_layers = [
             nn.Embedding(vocab_size, hidden_sizes[0]), # gives B x 1024 x 16 BxLxC 
-            Permute(0,2,1), # B x 16 x 1024 BxCxL
+            Permute(0,2,1),
             *[ResidualBlock(hidden_sizes[0], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)], #B x 16 x 1024
-            nn.Conv1d(hidden_sizes[0], hidden_sizes[1], kernel_size = 4, stride = 4), # B x 32 x 256
-            *[ResidualBlock(hidden_sizes[1], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)], # B x 32 x 256
-            nn.Conv1d(hidden_sizes[1], hidden_sizes[2], kernel_size = 2, stride = 2), # B x 64 x 128
-            *[ResidualBlock(hidden_sizes[2], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)], # B x 64 x 128
-            nn.Conv1d(hidden_sizes[2], hidden_sizes[3], kernel_size = 2, stride = 2), # B x 128 x 64
-            Permute(0,2,1), # B x L x C
-            *[TransformerRoPE(hidden_sizes[3], n_heads, dropout = 0.2, activation=activation) for _ in range(blocks_per_stage)], # B x 64 x 128 BxLxC
-            Permute(0,2,1), # BxCxL
-            nn.Conv1d(hidden_sizes[3], hidden_sizes[4], kernel_size = 2, stride = 2), # B x 256 x 32
-            Permute(0,2,1), # B x 32 x 256
-            *[TransformerRoPE(hidden_sizes[4], n_heads, dropout = 0.2, activation=activation) for _ in range(blocks_per_stage)], # B x 32 x 256
-            Permute(0,2,1), # B x 256 x 32 BxCxL
-            
-            nn.Conv1d(hidden_sizes[4], hidden_sizes[5], kernel_size = 2, stride = 2), # B x 512 x 16
-            Permute(0,2,1), # B x 16 x 512
-            *[TransformerRoPE(hidden_sizes[5], n_heads, dropout = 0.2, activation=activation) for _ in range(blocks_per_stage)], # B x 16 x 512
-            Permute(0,2,1), # B x 512 x 16 BxCxL
-
-            View(-1, hidden_sizes[5]*16),
-            nn.Linear(hidden_sizes[5]*16, bottleneck_size),
-            newGELU()
-        )
+        ]
+        for i in range(len(hidden_sizes)-1):
+            encoder_layers.append(nn.Conv1d(hidden_sizes[i], hidden_sizes[i+1], kernel_size = 2, stride = 2))
+            for _ in range(blocks_per_stage):
+                encoder_layers.append(ResidualBlock(hidden_sizes[i+1], kernel_size= 5, dropout = 0.2))
         
-        self.lin_mu = nn.Linear(bottleneck_size, bottleneck_size)
-        self.lin_var = nn.Linear(bottleneck_size, bottleneck_size)
+        encoder_layers.append(Permute(0,2,1))
+        for i in range(n_transformer_layers):
+            encoder_layers.append(TransformerRoPE(hidden_sizes[-1], n_heads, dropout = 0.2, activation=activation))
+        encoder_layers.append(Permute(0,2,1))
 
-        self.decoder = nn.Sequential(
-            nn.Linear(bottleneck_size, hidden_sizes[5]*16), #Bx8192
-            newGELU(),
-            View(-1, hidden_sizes[5], 16), # put them into B x 512 x 16, just as it was in last conv of encoder
-            Permute(0,2,1), # BxLxC
-            *[TransformerRoPE(hidden_sizes[5], n_heads, dropout = 0.2, activation=activation) for _ in range(blocks_per_stage)], #Bx16x512
-            Permute(0,2,1), #Bx512x16
-            nn.ConvTranspose1d(hidden_sizes[5], hidden_sizes[4], kernel_size = 2, stride = 2), # Bx256x32
-            Permute(0,2,1), #Bx32x256
+        self.encoder = nn.Sequential(*encoder_layers)
+        
+        self.lin_mu = nn.Conv1d(hidden_sizes[-1], bottleneck_size, kernel_size = 1)
+        self.lin_var = nn.Conv1d(hidden_sizes[-1], bottleneck_size, kernel_size = 1)
 
-            *[TransformerRoPE(hidden_sizes[4], n_heads, dropout = 0.2, activation=activation) for _ in range(blocks_per_stage)], #Bx32x256
-            Permute(0,2,1), #Bx256x32
-            nn.ConvTranspose1d(hidden_sizes[4], hidden_sizes[3], kernel_size = 2, stride = 2), # Bx128x64
-            Permute(0,2,1), #BxLxC Bx64x128
+        decoder_layers = []
+        decoder_layers.append(nn.Conv1d(bottleneck_size, hidden_sizes[-1], kernel_size = 1))
 
-            *[TransformerRoPE(hidden_sizes[3], n_heads, dropout = 0.2, activation=activation) for _ in range(blocks_per_stage)], #Bx64x128
-            Permute(0,2,1), # BxCxL Bx128x64
-            nn.ConvTranspose1d(hidden_sizes[3], hidden_sizes[2], kernel_size = 2, stride = 2), # B x 64 x 256
-            *[ResidualBlock(hidden_sizes[2], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)], #Bx64x256
-            nn.ConvTranspose1d(hidden_sizes[2], hidden_sizes[1], kernel_size = 2, stride = 2), # Bx32x512
-            *[ResidualBlock(hidden_sizes[1], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)], #Bx32x512
-            nn.ConvTranspose1d(hidden_sizes[1], hidden_sizes[0], kernel_size = 4, stride = 4), # Bx16x1024
-            *[ResidualBlock(hidden_sizes[0], kernel_size= 5, dropout = 0.2) for _ in range(blocks_per_stage)], #Bx16x1024
-            nn.Conv1d(hidden_sizes[0], vocab_size, kernel_size = 1), # to output B x 21 x 1024
-        )
+        decoder_layers.append(Permute(0,2,1))
+        for i in range(n_transformer_layers):
+            decoder_layers.append(TransformerRoPE(hidden_sizes[-1], n_heads, dropout = 0.2, activation=activation))
+        decoder_layers.append(Permute(0,2,1))
+
+        for i in range(len(hidden_sizes)-1, 0, -1):
+            for _ in range(blocks_per_stage):
+                decoder_layers.append(ResidualBlock(hidden_sizes[i], kernel_size= 5, dropout = 0.2))
+            decoder_layers.append(nn.ConvTranspose1d(hidden_sizes[i], hidden_sizes[i-1], kernel_size = 2, stride = 2))
+            
+        for _ in range(blocks_per_stage):
+            decoder_layers.append(ResidualBlock(hidden_sizes[0], kernel_size= 5, dropout = 0.2))
+        decoder_layers.append(nn.Conv1d(hidden_sizes[0], vocab_size, kernel_size = 1))
+
+        self.decoder = nn.Sequential(*decoder_layers)
 
         if use_decoder_length:
             self.decoderLength = nn.Sequential(
@@ -128,7 +111,7 @@ class convolutional_VAE_RoPE(ModelBackbone):
     def decode(self, x):
         output = self.decoder(x)
         if self.use_decoder_length:
-            length_pred = self.decoderLength(x)
+            length_pred = self.decoderLength(x.max(-1).values)
         else:
             length_pred = None
         return output, length_pred
@@ -259,6 +242,18 @@ class convolutional_VAE_RoPE(ModelBackbone):
                 # Release GPU memory occupied by PyTorch tensors
                 torch.cuda.empty_cache()
         else:
+            recon_x, length_pred, mean, log_var = self.forward(X)
+
+            counter = torch.arange(1024).expand(len(actual_lengths), -1).to(actual_lengths.device)
+            mask = counter <= torch.round(actual_lengths.unsqueeze(1)*1024)
+
+            reconstruction_loss = F.cross_entropy(recon_x.permute(0,2,1)[mask], X[mask])
+            length_loss = F.mse_loss(length_pred.squeeze(), actual_lengths)
+            KL_divergence = -0.5 * torch.sum(1 + log_var - mean**2 - torch.exp(log_var))
+
+            loss = reconstruction_loss + self.beta * KL_divergence + self.gamma * length_loss
+
+            
             recon_x, _, mean, log_var = self.forward(X)
             #lengthmask = self.get_mask_full_length(actual_lengths)
 
