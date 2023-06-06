@@ -104,6 +104,8 @@ class convolutional_VAE_RoPE(ModelBackbone):
         self.beta = beta
         self.gamma = gamma
 
+        self.bottleneck_shape = (bottleneck_size, 1024 // 2 ** (len(hidden_sizes)-1))
+
     def encode(self, x):
         x = self.encoder(x)
         return self.lin_mu(x), self.lin_var(x)
@@ -222,7 +224,7 @@ class convolutional_VAE_RoPE(ModelBackbone):
                 #niet ideaal hier maar anders not accessed, en kan anders ook niet gecontroleerd aan/uitzetten via sys.argv 
                 if batch_idx % 100000 == 0:
                     print(f"Evaluating performance of model after {batch_idx} steps. ")
-                    generated_seqs, roundedLengths, avg_length = generate_sequences(model=self, amount = 2500, temperature=0.8)
+                    generated_seqs, roundedLengths, avg_length = generate_sequences(model=self, amount = 2500, temperature=0.8, bottleneck_shape = self.bottleneck_shape)
 
                     embeddings_generated_seqs = process_embeddings_ESM2_35M(model = ESM2_35M,
                                                                                 data=generated_seqs, 

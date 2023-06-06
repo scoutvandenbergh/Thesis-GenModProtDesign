@@ -8,13 +8,13 @@ import time
 
 # GENERATE NOVEL PROTEIN SEQUENCES
 
-def generate_sequences(model, amount = 25000, temperature = 0.8):
+def generate_sequences(model, amount = 25000, temperature = 0.8, bottleneck_shape = (128,)):
     sampledProteins = []
     batch_size = 256
 
     start = time.time()
 
-    z = torch.randn(amount, 128).cuda()
+    z = torch.randn(amount, *bottleneck_shape).cuda()
     model.eval()
     roundedLengths = []
 
@@ -28,7 +28,7 @@ def generate_sequences(model, amount = 25000, temperature = 0.8):
             rounding = [round(num) for num in lengths.tolist()]
             roundedLengths.extend(rounding)
             softmax = nn.Softmax(dim=-1)
-            output_softmax = softmax(output/temperature).double().cpu().transpose(-2, -1)
+            output_softmax = softmax(output.transpose(-2, -1)/temperature).double().cpu()
 
             # Check if the output from softmax sums to 1, if not normalize, fix by GPT4 , required due to numerical issues for certain temperatures
             if not torch.allclose(output_softmax.sum(-1), torch.tensor(1.0).double(), atol=1e-5):
