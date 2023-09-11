@@ -24,3 +24,10 @@ This last script will create a HDF5 file `uniref50.h5t` containing the Uniref50 
 ## Train a VAE
 - Run `python evalpgm/scripts/train_VAE.py *uniref_file* *logfolder* *length_decoder_boolean*`
 - E.g. `nohup python evalpgm/scripts/train_VAE.py uniref50.h5t logs/ True &`
+
+## Download ESM2 model parameters
+ESM2 model parameters can be downloaded through the [official ESM GitHub repo](https://github.com/facebookresearch/esm#available-models) from META AI.
+
+## ProGen2
+ProGen2 can be downloaded from the [official ProGen GitHub repo](https://github.com/salesforce/progen) from Salesforce. \
+All relevant files for this part of the research can be found in the ProGen2 folder.
