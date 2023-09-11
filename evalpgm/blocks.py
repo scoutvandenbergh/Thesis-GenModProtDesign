@@ -22,14 +22,14 @@ class View(nn.Module):
     def forward(self, x):
         return x.reshape(*self.args)
     
-def swish(x, beta): #also wrap in class Swish(nn.Module)?
+def swish(x, beta):
     return x * 1/(1+torch.exp(-x * beta))
 
-def gelu(x): #implementation currently used in OpenAI GPTs and Google BERT, wrap in class newGELU(nn.Module) wrapper to use in ResidualBlock etc? 
+def gelu(x): #implementation currently used in OpenAI GPTs and Google BERT
     return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3.0))))
 
 class newGELU(nn.Module):
-    def forward(self, x): #implementation currently used in OpenAI GPTs and Google BERT, wrap in class newGELU(nn.Module) wrapper to use in ResidualBlock etc?
+    def forward(self, x): #implementation currently used in OpenAI GPTs and Google BERT
         return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3.0))))
 
 class ResidualBlock(nn.Module):
@@ -37,8 +37,7 @@ class ResidualBlock(nn.Module):
         super().__init__()
 
         self.net = nn.Sequential(
-            nn.Conv1d(hidden_dim, hidden_dim, kernel_size, padding = "same"), #channels in, channels out, kernel size
-            #nn.GELU(), #instead use new gelu, this ones uses 'input * 0.5 * (1.0 + torch.erf(input / math.sqrt(2.0)))' 
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size, padding = "same"),
             newGELU(),
             nn.Dropout(dropout),
             Permute(0,2,1),
@@ -72,12 +71,11 @@ class ModelBackbone(pl.LightningModule):
         # update params
         optimizer.step(closure=optimizer_closure)
 
-        # skip the first 1000 steps
         if self.trainer.global_step < self.hparams.n_warmup_steps:
             lr_scale = min(1.0, float(self.trainer.global_step + 1) / self.hparams.n_warmup_steps)
             for pg in optimizer.param_groups:
                 pg["lr"] = lr_scale * self.hparams.learning_rate
-    
+        self.log('learning_rate', optimizer.param_groups[0]['lr'])
 
     def n_params(self):
         params_per_layer = [(name, p.numel()) for name, p in self.named_parameters()]
@@ -118,21 +116,14 @@ class MultiHeadAttentionLayer(nn.Module):
         return attention
 
 class RoPEMultiHeadAttentionLayer(nn.Module):
-    def __init__(self, hidden_size, n_heads, dropout): #add argument to choose for rotary or abs, or relative, or learned
+    def __init__(self, hidden_size, n_heads, dropout): 
         super().__init__()
         
         assert hidden_size % n_heads == 0
         
         self.hidden_size = hidden_size
         self.n_heads = n_heads
-        self.head_dim = hidden_size // n_heads #hidden size in our model is [16, 32, 64, 128, 256], so head_dim is [2, 4, 8, 16, 32]
-
-        #NOTE: take this as base model, use fixed head_dim of 64 in expanded models perhaps
-
-        # GPT-J-6B
-        # The model consists of 28 layers with a model dimension of 4096, and a feedforward dimension of 16384. 
-        # The model dimension is split into 16 heads, each with a dimension of 256. 
-        # Rotary position encodings (RoPE) was applied to 64 dimensions of each head.
+        self.head_dim = hidden_size // n_heads
         
         self.kqv = nn.Linear(hidden_size, hidden_size * 3, bias=False) 
         self.output = nn.Linear(hidden_size, hidden_size, bias=False)
@@ -195,7 +186,7 @@ class TransformerRoPE(nn.Module):
         return output
     
     
-class TransformerRoPE_Parallel(nn.Module): #ask Gaetan if correct
+class TransformerRoPE_Parallel(nn.Module):
     def __init__(self, hidden_size, n_heads, dropout, activation = "SwiGLU"):
         super().__init__()
         self.ln1 = nn.LayerNorm(hidden_size)
